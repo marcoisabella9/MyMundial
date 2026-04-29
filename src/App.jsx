@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  Activity,
   BarChart3,
   CalendarClock,
   Check,
@@ -8,10 +7,9 @@ import {
   CircleHelp,
   CircleMinus,
   CirclePlus,
-  Code2,
+  Info,
   Medal,
   Radio,
-  RefreshCw,
   Save,
   Sparkles,
   UserRound,
@@ -20,9 +18,8 @@ import {
   X,
 } from 'lucide-react'
 import './App.css'
-import { apiNotes, awards, friends, groupMatchEvents, groups, liveEvents, teamMeta } from './data'
-import { appConfig, hasSupabaseConfig, productionChecklist, runtimeMode } from './lib/config'
-import { footballProviderReadiness } from './lib/football'
+import { awards, friends, groupMatchEvents, groups, liveEvents, teamMeta } from './data'
+import { hasSupabaseConfig, runtimeMode } from './lib/config'
 import { betaStore } from './lib/localBetaStore'
 import { supabase } from './lib/supabaseClient'
 import { supabaseMvpStore } from './lib/supabaseMvpStore'
@@ -33,7 +30,6 @@ const navItems = [
   { id: 'match', label: 'Match', icon: Radio },
   { id: 'leagues', label: 'Leagues', icon: Users },
   { id: 'awards', label: 'Awards', icon: Medal },
-  { id: 'api', label: 'Production', icon: Code2 },
 ]
 
 function scrollToTop() {
@@ -82,6 +78,13 @@ const initialGroupScores = Object.fromEntries(
     },
   ]),
 )
+
+const awardRecipients = {
+  potm: ['Kylian Mbappe', 'Lionel Messi', 'Jude Bellingham', 'Vinicius Junior', 'Lamine Yamal', 'Harry Kane', 'Jamal Musiala', 'Phil Foden'],
+  boot: ['Kylian Mbappe', 'Harry Kane', 'Erling Haaland', 'Lautaro Martinez', 'Cristiano Ronaldo', 'Vinicius Junior', 'Lamine Yamal', 'Julian Alvarez'],
+  glove: ['Alisson', 'Emiliano Martinez', 'Thibaut Courtois', 'Mike Maignan', 'Manuel Neuer', 'Unai Simon', 'Diogo Costa', 'Yassine Bounou'],
+  young: ['Lamine Yamal', 'Endrick', 'Kendry Paez', 'Jude Bellingham', 'Pau Cubarsi', 'Gavi', 'Arda Guler', 'Benjamin Sesko'],
+}
 
 function hydrateScoresFromPredictions(predictions) {
   const groupScores = { ...initialGroupScores }
@@ -207,6 +210,8 @@ function App() {
   const [authMode, setAuthMode] = useState('sign-in')
   const [authForm, setAuthForm] = useState({ displayName: '', email: '', password: '' })
   const [authStatus, setAuthStatus] = useState({ loading: Boolean(supabase), message: '', error: '' })
+  const [saveStatus, setSaveStatus] = useState({ loading: false, message: '', error: '' })
+  const [awardSaveStatus, setAwardSaveStatus] = useState({ loading: false, message: '', error: '' })
   const [profile, setProfile] = useState(() => betaStore.loadProfile())
   const [profileDraft, setProfileDraft] = useState(() => betaStore.loadProfile())
   const [league, setLeague] = useState(() => betaStore.loadLeague())
@@ -217,6 +222,7 @@ function App() {
   const [groupScores, setGroupScores] = useState(() => betaStore.loadGroupScores(initialGroupScores))
   const [bracketScores, setBracketScores] = useState(() => betaStore.loadBracketScores())
   const [selectedAward, setSelectedAward] = useState('potm')
+  const [awardPicks, setAwardPicks] = useState(() => betaStore.loadAwardPicks())
   const [matchContext, setMatchContext] = useState(defaultMatchContext)
   const currentUser = session?.user ?? null
   const isSignedIn = Boolean(currentUser)
@@ -250,9 +256,10 @@ function App() {
       setAuthStatus({ loading: true, message: 'Syncing your MyMundial account...', error: '' })
       try {
         const nextProfile = await supabaseMvpStore.ensureProfile(currentUser, profile)
-        const [remotePredictions, remoteLeague] = await Promise.all([
+        const [remotePredictions, remoteLeague, remoteAwardPicks] = await Promise.all([
           supabaseMvpStore.loadPredictions(currentUser),
           supabaseMvpStore.loadLeague(currentUser),
+          supabaseMvpStore.loadAwardPicks(currentUser),
         ])
         if (!isMounted) return
         setProfile(nextProfile)
@@ -274,6 +281,7 @@ function App() {
         }
         setPredictionCount(remotePredictions.length)
         setLastSavedAt(latestPredictionTime(remotePredictions))
+        setAwardPicks(remoteAwardPicks)
         setAuthStatus({
           loading: false,
           message: remotePredictions.length > 0 ? 'Synced saved picks from Supabase.' : 'Signed in. Save a pick to sync it.',
@@ -609,6 +617,7 @@ function App() {
       setLeague(betaStore.loadLeague())
       setGroupScores(betaStore.loadGroupScores(initialGroupScores))
       setBracketScores(betaStore.loadBracketScores())
+      setAwardPicks(betaStore.loadAwardPicks())
       setPredictionCount(betaStore.countPredictions())
       setLastSavedAt(betaStore.lastSavedAt())
       setAuthStatus({ loading: false, message: 'Signed out. Local beta mode is active.', error: '' })
@@ -670,6 +679,7 @@ function App() {
   async function saveCurrentPrediction(locked = false) {
     markCurrentScoreTouched()
     const scoreToSave = { ...activeScore, touched: true }
+    setSaveStatus({ loading: true, message: locked ? 'Locking pick...' : 'Saving prediction...', error: '' })
     try {
       if (isSignedIn) {
         await supabaseMvpStore.savePrediction({
@@ -684,7 +694,7 @@ function App() {
         setPredictionCount(remotePredictions.length)
         setLastSavedAt(latestPredictionTime(remotePredictions))
         if (remoteLeague) setLeague(remoteLeague)
-        setAuthStatus({ loading: false, message: locked ? 'Pick locked in Supabase.' : 'Prediction saved to Supabase.', error: '' })
+        setSaveStatus({ loading: false, message: locked ? 'Pick locked to your account.' : 'Prediction synced to your account.', error: '' })
         return
       }
       betaStore.savePrediction({
@@ -696,8 +706,29 @@ function App() {
       setPredictionCount(betaStore.countPredictions())
       setLastSavedAt(betaStore.lastSavedAt())
       setLeague(betaStore.loadLeague())
+      setSaveStatus({ loading: false, message: 'Prediction saved locally. Sign in to sync across devices.', error: '' })
     } catch (error) {
-      setAuthStatus({ loading: false, message: '', error: error.message })
+      setSaveStatus({ loading: false, message: '', error: error.message })
+    }
+  }
+
+  async function saveAwardPick(award, recipient) {
+    setSelectedAward(award.id)
+    setAwardSaveStatus({ loading: true, message: `Saving ${award.label}...`, error: '' })
+    try {
+      if (isSignedIn) {
+        const savedAward = await supabaseMvpStore.saveAwardPick({ profile, award, recipient })
+        setAwardPicks((current) => ({ ...current, [award.id]: savedAward }))
+        setLastSavedAt(savedAward.updatedAt)
+        setAwardSaveStatus({ loading: false, message: `${award.label} synced to your account.`, error: '' })
+        return
+      }
+      const savedAward = betaStore.saveAwardPick(award, recipient)
+      setAwardPicks((current) => ({ ...current, [award.id]: savedAward }))
+      setLastSavedAt(betaStore.lastSavedAt())
+      setAwardSaveStatus({ loading: false, message: `${award.label} saved locally. Sign in to sync it.`, error: '' })
+    } catch (error) {
+      setAwardSaveStatus({ loading: false, message: '', error: error.message })
     }
   }
 
@@ -740,7 +771,6 @@ function App() {
           </div>
           <div className="top-actions">
             <button onClick={() => setView('leagues')}><Users size={16} /> {isSignedIn ? profile.displayName : league.name}</button>
-            <button className="primary" onClick={() => saveCurrentPrediction(true)}><Sparkles size={16} /> Lock draft</button>
           </div>
         </header>
 
@@ -751,6 +781,14 @@ function App() {
             <div><strong>{runtimeMode === 'local-beta' ? 'Local' : 'Live'}</strong><span>persistence mode</span></div>
             <div><strong>{projectedPoints}</strong><span>active pick points</span></div>
           </div>
+        )}
+
+        {!isSignedIn && view !== 'leagues' && (
+          <SignedOutSplash onOpenAccount={() => setView('leagues')} />
+        )}
+
+        {isSignedIn && view === 'groups' && (
+          <SignedInGuide displayName={profile.displayName} />
         )}
 
         {view === 'groups' && (
@@ -818,6 +856,8 @@ function App() {
               onPickAdvancer={pickAdvancer}
               pickComplete={pickComplete}
               isKnockoutTie={isKnockoutTie}
+              saveStatus={saveStatus}
+              isSignedIn={isSignedIn}
             />
             <MvpMatchRail context={matchContext} score={activeScore} />
           </section>
@@ -859,12 +899,39 @@ function App() {
         )}
 
         {view === 'awards' && (
-          <AwardsView selectedAward={selectedAward} setSelectedAward={setSelectedAward} />
+          <AwardsView
+            selectedAward={selectedAward}
+            setSelectedAward={setSelectedAward}
+            awardPicks={awardPicks}
+            onSaveAwardPick={saveAwardPick}
+            awardSaveStatus={awardSaveStatus}
+            isSignedIn={isSignedIn}
+          />
         )}
-
-        {view === 'api' && <ApiView />}
       </section>
     </main>
+  )
+}
+
+function SignedOutSplash({ onOpenAccount }) {
+  return (
+    <section className="splash-panel">
+      <div>
+        <p className="eyebrow">Ready to save your bracket?</p>
+        <h2>Create an account before you start picking</h2>
+        <p>Your predictions can stay on this device, but an account syncs them across devices and lets you join private leagues.</p>
+      </div>
+      <button className="primary" onClick={onOpenAccount}><UserRound size={16} /> Sign in or create account</button>
+    </section>
+  )
+}
+
+function SignedInGuide({ displayName }) {
+  return (
+    <section className="guide-panel">
+      <strong>{displayName}, build your bracket in three passes</strong>
+      <span>Pick group scores, save each match, check the bracket path, then choose tournament awards.</span>
+    </section>
   )
 }
 
@@ -961,7 +1028,25 @@ function MatchTeam({ slot, score, picked }) {
   )
 }
 
-function MatchPanel({ score, updateScore, projectedPoints, context, onBack, onPreviousMatch, onNextMatch, onSavePrediction, onPickAdvancer, pickComplete, isKnockoutTie, compact = false }) {
+function MatchPanel({
+  score,
+  updateScore,
+  projectedPoints,
+  context,
+  onBack,
+  onPreviousMatch,
+  onNextMatch,
+  onSavePrediction,
+  onPickAdvancer,
+  pickComplete,
+  isKnockoutTie,
+  saveStatus,
+  isSignedIn,
+  compact = false,
+}) {
+  const saveTooltip = isSignedIn
+    ? 'Click Save prediction to sync this pick to your account.'
+    : 'Click Save prediction to keep this pick on this device. Sign in to sync across devices.'
   return (
     <aside className={`panel match-detail ${compact ? 'compact' : ''}`}>
       <div className="match-meta">
@@ -1010,28 +1095,36 @@ function MatchPanel({ score, updateScore, projectedPoints, context, onBack, onPr
         <Sparkles size={16} />
         Projected lock value: {projectedPoints} pts
       </div>
-      <button className="save-pick" onClick={onSavePrediction} disabled={context.type === 'bracket' && !pickComplete}>
-        <Save size={16} />
-        {context.type === 'bracket' && !pickComplete ? 'Pick advancer first' : 'Save prediction'}
-      </button>
+      <div className="save-action-wrap">
+        <button
+          className={`save-pick ${saveStatus.loading ? 'saving' : ''}`}
+          onClick={onSavePrediction}
+          disabled={saveStatus.loading || (context.type === 'bracket' && !pickComplete)}
+          title={saveTooltip}
+        >
+          {saveStatus.loading ? <RefreshSpinner /> : <Save size={16} />}
+          {saveStatus.loading ? 'Saving...' : context.type === 'bracket' && !pickComplete ? 'Pick advancer first' : 'Save prediction'}
+        </button>
+        <div className="save-tooltip" title={saveTooltip}>
+          <Info size={15} />
+          <span>{saveTooltip}</span>
+        </div>
+      </div>
+      {(saveStatus.message || saveStatus.error) && (
+        <p className={`save-message ${saveStatus.error ? 'error' : ''}`}>{saveStatus.error || saveStatus.message}</p>
+      )}
       <div className="points-stack">
         <ScoreLine label={context.type === 'bracket' ? 'Advancer picked' : 'Result picked'} value={pickComplete ? '+100' : 'pending'} state={pickComplete ? 'correct' : 'pending'} />
         <ScoreLine label="Exact score" value={pickComplete ? '+40' : 'pending'} state={pickComplete ? 'partial' : 'pending'} />
         <ScoreLine label="Goal difference" value={pickComplete ? '+20' : 'pending'} state={pickComplete ? 'partial' : 'pending'} />
-        <ScoreLine label="Result settlement" value="API sync" state="pending" />
-      </div>
-      <div className="event-list">
-        {context.events.map((event) => (
-          <div className={`event-row ${event.state}`} key={`${event.time}-${event.detail}`}>
-            <span>{event.time}</span>
-            <strong>{event.type}</strong>
-            <p>{event.detail}</p>
-            <em>{event.score}</em>
-          </div>
-        ))}
+        <ScoreLine label="Saved to account" value={isSignedIn ? 'on save' : 'sign in'} state="pending" />
       </div>
     </aside>
   )
+}
+
+function RefreshSpinner() {
+  return <span className="button-spinner" aria-hidden="true" />
 }
 
 function MvpMatchRail({ context, score }) {
@@ -1272,7 +1365,9 @@ function LeagueManager({ league, leagueName, setLeagueName, inviteCode, setInvit
   )
 }
 
-function AwardsView({ selectedAward, setSelectedAward }) {
+function AwardsView({ selectedAward, setSelectedAward, awardPicks, onSaveAwardPick, awardSaveStatus, isSignedIn }) {
+  const activeAward = awards.find((award) => award.id === selectedAward) ?? awards[0]
+  const activeRecipients = awardRecipients[activeAward.id] ?? []
   return (
     <section className="page-grid">
       <div className="panel wide">
@@ -1281,17 +1376,41 @@ function AwardsView({ selectedAward, setSelectedAward }) {
             <p className="eyebrow">Tournament-long bonuses</p>
             <h2>Awards predictions</h2>
           </div>
-          <span className="pill">Locks before kickoff</span>
+          <span className="pill">{isSignedIn ? 'Syncs to account' : 'Sign in to sync'}</span>
         </div>
         <div className="award-grid">
           {awards.map((award) => (
             <button className={`award-card ${selectedAward === award.id ? 'selected' : ''}`} key={award.id} onClick={() => setSelectedAward(award.id)}>
               <Medal size={18} />
               <span>{award.label}</span>
-              <strong>{award.pick}</strong>
-              <small>{award.points} pts - {award.state}</small>
+              <strong>{awardPicks[award.id]?.recipient ?? 'No pick yet'}</strong>
+              <small>{award.points} pts - {awardPicks[award.id] ? 'saved' : 'open'}</small>
             </button>
           ))}
+        </div>
+        <div className="recipient-panel">
+          <div>
+            <p className="eyebrow">Pick recipient</p>
+            <h3>{activeAward.label}</h3>
+            <span>{activeAward.points} points if correct</span>
+          </div>
+          <div className="recipient-grid">
+            {activeRecipients.map((recipient) => (
+              <button
+                key={recipient}
+                className={awardPicks[activeAward.id]?.recipient === recipient ? 'selected' : ''}
+                onClick={() => onSaveAwardPick(activeAward, recipient)}
+                disabled={awardSaveStatus.loading}
+              >
+                {recipient}
+              </button>
+            ))}
+          </div>
+          {(awardSaveStatus.message || awardSaveStatus.error) && (
+            <p className={`save-message ${awardSaveStatus.error ? 'error' : ''}`}>
+              {awardSaveStatus.error || awardSaveStatus.message}
+            </p>
+          )}
         </div>
       </div>
       <aside className="panel">
@@ -1304,76 +1423,7 @@ function AwardsView({ selectedAward, setSelectedAward }) {
         <div className="points-stack">
           <ScoreLine label="Match picks" value="pending" state="pending" />
           <ScoreLine label="Bracket path" value="pending" state="pending" />
-          <ScoreLine label="Awards pending" value="+440" state="pending" />
-        </div>
-      </aside>
-    </section>
-  )
-}
-
-function ApiView() {
-  return (
-    <section className="page-grid">
-      <div className="panel wide">
-        <div className="panel-head">
-          <div>
-            <p className="eyebrow">Production foundation</p>
-            <h2>Supabase and football data adapters</h2>
-          </div>
-          <span className="pill live"><Activity size={14} /> {runtimeMode}</span>
-        </div>
-        <div className="readiness-grid">
-          {productionChecklist.map((item) => (
-            <div className="readiness-card" key={item.label}>
-              <strong>{item.label}</strong>
-              <span>{item.state}</span>
-              <p>{item.detail}</p>
-            </div>
-          ))}
-        </div>
-        <div className="api-map">
-          {footballProviderReadiness.resources.map((item) => (
-            <div key={item}>
-              <Code2 size={16} />
-              <strong>{item}</strong>
-              <span>normalized table</span>
-            </div>
-          ))}
-        </div>
-        <div className="provider-grid">
-          {footballProviderReadiness.trials.map((provider) => (
-            <article key={provider.id}>
-              <strong>{provider.label}</strong>
-              <span>{provider.status}</span>
-              <p>{provider.strengths}</p>
-              <small>{provider.nextCheck}</small>
-            </article>
-          ))}
-        </div>
-        <div className="note-list">
-          {apiNotes.map((note) => <p key={note}>{note}</p>)}
-          <p>Supabase schema: supabase/migrations/202604280001_initial_schema.sql</p>
-          <p>Sync function scaffold: supabase/functions/sync-football-data</p>
-        </div>
-      </div>
-      <aside className="panel">
-        <div className="panel-head">
-          <div>
-            <p className="eyebrow">Beta launch gates</p>
-            <h2>What must become real</h2>
-          </div>
-        </div>
-        <div className="check-list">
-          <span><Check size={16} /> Local saved predictions</span>
-          <span><Check size={16} /> Local beta leagues</span>
-          <span><Check size={16} /> Normalized schema drafted</span>
-          <span><RefreshCw size={16} /> Provider trials pending keys</span>
-          <span><CircleHelp size={16} /> Supabase project not connected</span>
-        </div>
-        <div className="config-card">
-          <strong>Runtime config</strong>
-          <span>Supabase: {hasSupabaseConfig ? 'configured' : 'missing env'}</span>
-          <span>Provider: {appConfig.dataProvider}</span>
+          <ScoreLine label="Awards picked" value={`${Object.keys(awardPicks).length}/${awards.length}`} state={Object.keys(awardPicks).length === awards.length ? 'correct' : 'pending'} />
         </div>
       </aside>
     </section>

@@ -43,10 +43,11 @@ function createDefaultState() {
     league: defaultLeague,
     groupScores: null,
     bracketScores: {},
-    predictions: {},
-    lastSavedAt: null,
+      predictions: {},
+      awardPicks: {},
+      lastSavedAt: null,
+    }
   }
-}
 
 function predictionKey(userId, contextId) {
   return `${userId}:${contextId}`
@@ -190,5 +191,30 @@ export const betaStore = {
 
   lastSavedAt() {
     return readState().lastSavedAt
+  },
+
+  loadAwardPicks() {
+    return readState().awardPicks ?? {}
+  },
+
+  saveAwardPick(award, recipient) {
+    const state = readState()
+    const now = new Date().toISOString()
+    const awardPick = {
+      awardKey: award.id,
+      awardLabel: award.label,
+      recipient,
+      updatedAt: now,
+      resultState: 'draft',
+    }
+    writeState({
+      ...state,
+      awardPicks: {
+        ...(state.awardPicks ?? {}),
+        [award.id]: awardPick,
+      },
+      lastSavedAt: now,
+    })
+    return awardPick
   },
 }

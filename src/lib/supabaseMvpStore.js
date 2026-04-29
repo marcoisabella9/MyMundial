@@ -52,6 +52,17 @@ function predictionFromRow(row) {
   }
 }
 
+function awardPickFromRow(row) {
+  return {
+    awardKey: row.award_key,
+    awardLabel: row.award_label,
+    recipient: row.recipient,
+    lockedAt: row.locked_at,
+    resultState: row.result_state,
+    updatedAt: row.updated_at,
+  }
+}
+
 function leagueFromRows(league, members = [], activity = []) {
   if (!league) return null
   return {
@@ -270,5 +281,34 @@ export const supabaseMvpStore = {
       .order('updated_at', { ascending: false })
     if (error) throw error
     return data.map(predictionFromRow)
+  },
+
+  async loadAwardPicks(user) {
+    const client = await requireClient()
+    const { data, error } = await client
+      .from('mvp_award_picks')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('updated_at', { ascending: false })
+    if (error) throw error
+    return Object.fromEntries(data.map((row) => [row.award_key, awardPickFromRow(row)]))
+  },
+
+  async saveAwardPick({ profile, award, recipient, locked = false }) {
+    const client = await requireClient()
+    const { data, error } = await client
+      .from('mvp_award_picks')
+      .upsert({
+        user_id: profile.id,
+        award_key: award.id,
+        award_label: award.label,
+        recipient,
+        locked_at: locked ? new Date().toISOString() : null,
+        result_state: locked ? 'locked' : 'draft',
+      }, { onConflict: 'user_id,award_key' })
+      .select()
+      .single()
+    if (error) throw error
+    return awardPickFromRow(data)
   },
 }
