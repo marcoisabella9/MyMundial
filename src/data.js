@@ -133,7 +133,9 @@ export const awards = [
 ]
 
 export const apiNotes = [
-  'Recommended adapter: Sportmonks World Cup 2026 API',
-  'Prototype uses mock fixtures but keeps provider-shaped resources: fixtures, standings, lineups, events, players, brackets.',
-  'Provider decision still needs a trial key check for rate limits, licensing, and lineup/event latency.',
+  'V1 provider path: start with API-FOOTBALL for fixtures, teams, scores, standings, and results.',
+  'Sportmonks remains a backup check if World Cup 2026 coverage or commercial terms are better.',
+  'Provider calls stay server-side through Supabase Edge Functions or a lightweight app API.',
+  'The browser reads normalized MVP resources only: fixtures, teams, standings, results, predictions, awards, and scoring results.',
+  'Lineups, scorer picks, MOTM, and live player events are post-MVP features.',
 ]

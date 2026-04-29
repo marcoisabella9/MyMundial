@@ -1,17 +1,15 @@
-# CupCall World Cup Predictor
+# MyMundial
 
-CupCall is a React/Vite prototype for a World Cup bracket prediction app. It focuses on group-stage predictions, a dynamically generated round-of-32 knockout bracket, match-level score picks, player-level scorer and man-of-the-match picks, points previews, and private/global competition concepts.
+MyMundial is a World Cup prediction app moving from prototype toward a playable beta. V1 is intentionally focused on team winners, match scores, bracket advancement, private leagues, leaderboards, and tournament awards so the product can ship quickly.
 
-## Current Prototype
+## Current Foundation
 
-- 48-team World Cup 2026 group-stage setup with 12 groups of 4 teams.
-- Editable group match predictions that update group tables.
-- Round-of-32 bracket slots that unlock from predicted group outcomes.
-- Match detail flow with previous/next navigation across group matches and generated knockout matches.
-- Score prediction controls with points preview.
-- Lineup-based scorer and MOTM selection with scorer limits tied to predicted goals.
-- Clean desktop-first UI with responsive groundwork for later mobile refinement.
-- Data API planning surfaced in Linear for live scores, events, lineups, and stats.
+- React/Vite browser app.
+- Local beta persistence for profile, league, saved scores, and saved predictions.
+- Supabase migration for profiles, leagues, members, teams, fixtures, predictions, award picks, and scoring results.
+- Supabase Edge Function scaffold for server-side football provider sync.
+- Provider adapter contract with API-FOOTBALL as the first V1 target and Sportmonks as a backup check.
+- `.env.example` documenting required browser and server variables.
 
 ## Run Locally
 
@@ -29,17 +27,20 @@ npm run lint
 npm run build
 ```
 
-## Tech Stack
+## Production Setup Sequence
 
-- React
-- Vite
-- Lucide React icons
-- ESLint
+1. Create a Supabase project.
+2. Apply `supabase/migrations/202604280001_initial_schema.sql`.
+3. Copy `.env.example` to `.env.local` and fill in Supabase browser keys.
+4. Add provider keys as server-side secrets, not Vite variables.
+5. Deploy `supabase/functions/sync-football-data`.
+6. Trial API-FOOTBALL for fixtures, teams, scores, standings, and results.
+7. Replace local beta persistence with Supabase table reads/writes.
 
-## Next Product Areas
+## Deferred Until After MVP
 
-- Persist user brackets and private league membership.
-- Connect a football data API for fixtures, live events, lineups, player stats, and results.
-- Add authentication and invite flows.
-- Add global/private leaderboards and award picks.
-- Harden World Cup 2026 knockout slot mapping against the final FIFA bracket rules.
+Lineups, scorer picks, MOTM, live player events, and other player-level props are intentionally out of the launch path. They should come back only after accounts, private leagues, saved predictions, football result sync, and settlement are working reliably.
+
+## Important Security Rule
+
+Football API keys and Supabase service-role keys must never be exposed to the browser. Keep them in Supabase Edge Functions or a server-side API layer.

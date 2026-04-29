@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Activity,
   BarChart3,
@@ -10,15 +10,20 @@ import {
   CirclePlus,
   Code2,
   Medal,
-  MousePointer2,
   Radio,
+  RefreshCw,
+  Save,
   Sparkles,
+  UserRound,
   Trophy,
   Users,
   X,
 } from 'lucide-react'
 import './App.css'
-import { apiNotes, awards, friends, groupMatchEvents, groups, lineups, liveEvents, teamMeta } from './data'
+import { apiNotes, awards, friends, groupMatchEvents, groups, liveEvents, teamMeta } from './data'
+import { appConfig, hasSupabaseConfig, productionChecklist, runtimeMode } from './lib/config'
+import { footballProviderReadiness } from './lib/football'
+import { betaStore } from './lib/localBetaStore'
 
 const navItems = [
   { id: 'groups', label: 'Groups', icon: BarChart3 },
@@ -26,7 +31,7 @@ const navItems = [
   { id: 'match', label: 'Match', icon: Radio },
   { id: 'leagues', label: 'Leagues', icon: Users },
   { id: 'awards', label: 'Awards', icon: Medal },
-  { id: 'api', label: 'Data API', icon: Code2 },
+  { id: 'api', label: 'Production', icon: Code2 },
 ]
 
 function scrollToTop() {
@@ -163,40 +168,27 @@ function buildStandings(groupScores) {
   }))
 }
 
-function fallbackLineup(team) {
-  const code = meta(team).code
-  return [
-    ['1', `${code} Keeper`, 'GK', 0, 5, 3],
-    ['2', `${code} RB`, 'RB', 0, 4, 1],
-    ['4', `${code} CB`, 'CB', 1, 4, 2],
-    ['5', `${code} CB`, 'CB', 0, 4, 4],
-    ['3', `${code} LB`, 'LB', 0, 4, 5],
-    ['6', `${code} DM`, 'DM', 1, 3, 2],
-    ['8', `${code} CM`, 'CM', 2, 3, 4],
-    ['10', `${code} AM`, 'AM', 3, 2, 3],
-    ['7', `${code} RW`, 'RW', 4, 1, 1],
-    ['9', `${code} ST`, 'ST', 6, 1, 3],
-    ['11', `${code} LW`, 'LW', 4, 1, 5],
-  ]
-}
-
-function playerTeam(playerName, teams) {
-  return teams.find((team) => (lineups[team] ?? fallbackLineup(team)).some(([, name]) => name === playerName))
-}
-
-function countScorersForTeam(scorers, team, teams) {
-  return scorers.filter((playerName) => playerTeam(playerName, teams) === team).length
-}
-
 function App() {
   const [view, setView] = useState('groups')
-  const [groupScores, setGroupScores] = useState(initialGroupScores)
-  const [bracketScores, setBracketScores] = useState({})
+  const [profile, setProfile] = useState(() => betaStore.loadProfile())
+  const [profileDraft, setProfileDraft] = useState(() => betaStore.loadProfile())
+  const [league, setLeague] = useState(() => betaStore.loadLeague())
+  const [leagueName, setLeagueName] = useState(() => betaStore.loadLeague().name)
+  const [inviteCode, setInviteCode] = useState('')
+  const [predictionCount, setPredictionCount] = useState(() => betaStore.countPredictions())
+  const [lastSavedAt, setLastSavedAt] = useState(() => betaStore.lastSavedAt())
+  const [groupScores, setGroupScores] = useState(() => betaStore.loadGroupScores(initialGroupScores))
+  const [bracketScores, setBracketScores] = useState(() => betaStore.loadBracketScores())
   const [selectedAward, setSelectedAward] = useState('potm')
-  const [pickMode, setPickMode] = useState('scorer')
-  const [scorers, setScorers] = useState([])
-  const [motm, setMotm] = useState('')
   const [matchContext, setMatchContext] = useState(defaultMatchContext)
+
+  useEffect(() => {
+    betaStore.saveGroupScores(groupScores)
+  }, [groupScores])
+
+  useEffect(() => {
+    betaStore.saveBracketScores(bracketScores)
+  }, [bracketScores])
 
   const standings = useMemo(() => buildStandings(groupScores), [groupScores])
 
@@ -327,14 +319,12 @@ function App() {
   }
 
   const activeScore = scoreForContext(matchContext)
-  const scoreTotal = activeScore.homeScore + activeScore.awayScore
-  const projectedPoints = (activeScore.homeScore === activeScore.awayScore ? 0 : 100) + (activeScore.homeScore === 2 && activeScore.awayScore === 1 ? 40 : 0) + scorers.length * 15 + (motm ? 35 : 0)
+  const hasWinner = activeScore.homeScore !== activeScore.awayScore
+  const hasExactScorePreview = activeScore.homeScore === 2 && activeScore.awayScore === 1
+  const projectedPoints = (hasWinner ? 100 : 0) + (hasExactScorePreview ? 40 : 0) + (hasWinner ? 20 : 0)
 
   function openMatch(context) {
     setMatchContext(context)
-    setScorers([])
-    setMotm('')
-    setPickMode('scorer')
     setView('match')
     scrollToTop()
   }
@@ -396,20 +386,32 @@ function App() {
     }
   }
 
-  function handlePlayerPick(playerName, team) {
-    if (pickMode === 'motm') {
-      setMotm(playerName)
-      return
-    }
-    const teamGoals = team === matchContext.home ? activeScore.homeScore : activeScore.awayScore
-    if (teamGoals < 1) return
-    setScorers((current) => {
-      if (current.includes(playerName)) return current.filter((item) => item !== playerName)
-      const alreadyPickedForTeam = countScorersForTeam(current, team, [matchContext.home, matchContext.away])
-      if (alreadyPickedForTeam >= teamGoals) return current
-      if (current.length >= scoreTotal) return current
-      return [...current, playerName]
+  function saveProfile() {
+    const nextProfile = betaStore.saveProfile(profileDraft)
+    setProfile(nextProfile)
+    setProfileDraft(nextProfile)
+    setLeague(betaStore.loadLeague())
+  }
+
+  function createLeague() {
+    setLeague(betaStore.createLeague(leagueName, profile))
+  }
+
+  function joinLeague() {
+    setLeague(betaStore.joinLeague(inviteCode, profile))
+    setInviteCode('')
+  }
+
+  function saveCurrentPrediction(locked = false) {
+    betaStore.savePrediction({
+      profile,
+      context: matchContext,
+      score: activeScore,
+      locked,
     })
+    setPredictionCount(betaStore.countPredictions())
+    setLastSavedAt(betaStore.lastSavedAt())
+    setLeague(betaStore.loadLeague())
   }
 
   return (
@@ -418,7 +420,7 @@ function App() {
         <div className="brand">
           <span className="brand-mark"><Trophy size={22} /></span>
           <div>
-            <strong>CupCall</strong>
+            <strong>MyMundial</strong>
             <small>World Cup 2026</small>
           </div>
         </div>
@@ -437,9 +439,9 @@ function App() {
           })}
         </nav>
         <div className="side-card">
-          <span>Live test points</span>
-          <strong>{1240 + projectedPoints}</strong>
-          <small>Global rank 2,318</small>
+          <span>{runtimeMode === 'local-beta' ? 'Local beta mode' : 'Supabase ready'}</span>
+          <strong>{predictionCount}</strong>
+          <small>saved predictions</small>
         </div>
       </aside>
 
@@ -447,19 +449,19 @@ function App() {
         <header className="topbar">
           <div>
             <p className="eyebrow">Prediction studio</p>
-            <h1>World Cup bracket, group stage, and live match picks</h1>
+            <h1>MyMundial V1: scores, brackets, private leagues, and awards</h1>
           </div>
           <div className="top-actions">
-            <button><Users size={16} /> Private league</button>
-            <button className="primary"><Sparkles size={16} /> Lock draft</button>
+            <button onClick={() => setView('leagues')}><Users size={16} /> {league.name}</button>
+            <button className="primary" onClick={() => saveCurrentPrediction(true)}><Sparkles size={16} /> Lock draft</button>
           </div>
         </header>
 
         <div className="status-strip">
           <div><strong>48</strong><span>teams loaded</span></div>
           <div><strong>{groupMatchups.length}</strong><span>group matches</span></div>
-          <div><strong>32</strong><span>knockout slots</span></div>
-          <div><strong>{projectedPoints}</strong><span>match points preview</span></div>
+          <div><strong>{runtimeMode === 'local-beta' ? 'Local' : 'Live'}</strong><span>persistence mode</span></div>
+          <div><strong>{projectedPoints}</strong><span>active pick points</span></div>
         </div>
 
         {view === 'groups' && (
@@ -480,10 +482,11 @@ function App() {
                 {bracketRounds.map(([round, matches], roundIndex) => (
                   <div className={`round-column round-${roundIndex}`} key={round}>
                     <h3>{round}</h3>
-                    {matches.map((match) => (
+                    {matches.map((match, matchIndex) => (
                       <button
                         className={`match-card ${match.state}`}
                         key={match.id}
+                        style={{ '--slot-row': bracketSlotRow(roundIndex, matchIndex) }}
                         disabled={!match.a?.team || !match.b?.team}
                         onClick={() => openMatch({
                           id: match.id,
@@ -521,40 +524,34 @@ function App() {
               onBack={() => setView(matchContext.backView)}
               onPreviousMatch={() => goToAdjacentMatch(-1)}
               onNextMatch={() => goToAdjacentMatch(1)}
-              scorers={scorers}
+              onSavePrediction={() => saveCurrentPrediction(false)}
             />
-            <div className="panel wide">
-              <div className="panel-head">
-                <div>
-                  <p className="eyebrow">Player-level picks</p>
-                  <h2>Pick scorers and MOTM from the lineup</h2>
-                </div>
-                <span className="pill">{scorers.length}/{scoreTotal} scorers selected</span>
-              </div>
-              <div className="pick-console">
-                <button className={pickMode === 'scorer' ? 'active-chip' : ''} onClick={() => setPickMode('scorer')}><MousePointer2 size={15} /> Add scorers</button>
-                <button className={pickMode === 'motm' ? 'active-chip' : ''} onClick={() => setPickMode('motm')}><Medal size={15} /> Set MOTM</button>
-                <div>
-                  <span>Scorers: {scorers.length ? scorers.join(', ') : 'none'}</span>
-                  <span>MOTM: {motm || 'none selected'}</span>
-                </div>
-              </div>
-              <LineupBoard
-                teams={[matchContext.home, matchContext.away]}
-                scorers={scorers}
-                motm={motm}
-                pickMode={pickMode}
-                onPlayerPick={handlePlayerPick}
-                score={activeScore}
-                context={matchContext}
-              />
-            </div>
+            <MvpMatchRail context={matchContext} score={activeScore} />
           </section>
         )}
 
         {view === 'leagues' && (
-          <section className="page-grid">
-            <Leaderboard title="Private league" subtitle="Marco's bracket room" rows={friends} />
+          <section className="page-grid leagues-page">
+            <div className="league-stack">
+              <AccountPanel
+                profile={profile}
+                draft={profileDraft}
+                setDraft={setProfileDraft}
+                onSave={saveProfile}
+                lastSavedAt={lastSavedAt}
+                predictionCount={predictionCount}
+              />
+              <LeagueManager
+                league={league}
+                leagueName={leagueName}
+                setLeagueName={setLeagueName}
+                inviteCode={inviteCode}
+                setInviteCode={setInviteCode}
+                onCreate={createLeague}
+                onJoin={joinLeague}
+              />
+            </div>
+            <Leaderboard title="League standings" subtitle={league.name} rows={friends} />
             <Leaderboard title="Global leaderboard" subtitle="Overall World Cup rank" rows={[...friends].sort((a, b) => b.total - a.total)} global />
           </section>
         )}
@@ -567,6 +564,12 @@ function App() {
       </section>
     </main>
   )
+}
+
+function bracketSlotRow(roundIndex, matchIndex) {
+  const spacing = 2 ** roundIndex
+  const offset = Math.max(1, spacing)
+  return 3 + (matchIndex * spacing * 2) + offset
 }
 
 function GroupsView({ standings, openMatch, groupScores }) {
@@ -641,7 +644,7 @@ function MatchTeam({ slot, score, picked }) {
   )
 }
 
-function MatchPanel({ score, updateScore, projectedPoints, context, onBack, onPreviousMatch, onNextMatch, scorers = [], compact = false }) {
+function MatchPanel({ score, updateScore, projectedPoints, context, onBack, onPreviousMatch, onNextMatch, onSavePrediction, compact = false }) {
   return (
     <aside className={`panel match-detail ${compact ? 'compact' : ''}`}>
       <div className="match-meta">
@@ -675,11 +678,15 @@ function MatchPanel({ score, updateScore, projectedPoints, context, onBack, onPr
         <Sparkles size={16} />
         Projected lock value: {projectedPoints} pts
       </div>
+      <button className="save-pick" onClick={onSavePrediction}>
+        <Save size={16} />
+        Save prediction
+      </button>
       <div className="points-stack">
         <ScoreLine label="Winner picked" value={score.homeScore === score.awayScore ? 'pending' : '+100'} state={score.homeScore === score.awayScore ? 'pending' : 'correct'} />
         <ScoreLine label="Exact score" value={score.homeScore === 2 && score.awayScore === 1 ? '+40' : 'pending'} state={score.homeScore === 2 && score.awayScore === 1 ? 'partial' : 'pending'} />
-        <ScoreLine label="Predicted scorers" value={scorers.length ? `+${scorers.length * 15}` : 'pending'} state={scorers.length ? 'correct' : 'pending'} />
-        <ScoreLine label="Real event mismatch" value="0" state="missed" />
+        <ScoreLine label="Goal difference" value={score.homeScore === score.awayScore ? 'pending' : '+20'} state={score.homeScore === score.awayScore ? 'pending' : 'partial'} />
+        <ScoreLine label="Result settlement" value="API sync" state="pending" />
       </div>
       <div className="event-list">
         {context.events.map((event) => (
@@ -695,51 +702,56 @@ function MatchPanel({ score, updateScore, projectedPoints, context, onBack, onPr
   )
 }
 
+function MvpMatchRail({ context, score }) {
+  const winner = score.homeScore === score.awayScore
+    ? 'No winner selected yet'
+    : score.homeScore > score.awayScore
+      ? context.home
+      : context.away
+
+  return (
+    <div className="panel wide mvp-rail">
+      <div className="panel-head">
+        <div>
+          <p className="eyebrow">V1 launch scope</p>
+          <h2>Score pick and settlement path</h2>
+        </div>
+        <span className="pill">No player props in MVP</span>
+      </div>
+      <div className="mvp-grid">
+        <article>
+          <strong>Current pick</strong>
+          <p>{context.home} {score.homeScore}-{score.awayScore} {context.away}</p>
+          <span>{winner}</span>
+        </article>
+        <article>
+          <strong>Server validation</strong>
+          <p>API-FOOTBALL sync will normalize fixtures, scores, standings, and final results.</p>
+          <span>Provider key stays in Supabase Edge Function secrets.</span>
+        </article>
+        <article>
+          <strong>League impact</strong>
+          <p>Saved predictions will settle into private league and global leaderboards.</p>
+          <span>Winner, exact score, goal difference, bracket, and awards.</span>
+        </article>
+      </div>
+      <div className="deferred-card">
+        <Medal size={18} />
+        <div>
+          <strong>Post-MVP player layer</strong>
+          <p>Lineups, scorer picks, MOTM, and live player events are intentionally deferred until the core app is shipped.</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ScoreLine({ label, value, state }) {
   const Icon = state === 'missed' ? X : state === 'pending' ? CircleHelp : Check
   return (
     <div className={`score-line ${state}`}>
       <span><Icon size={15} /> {label}</span>
       <strong>{value}</strong>
-    </div>
-  )
-}
-
-function LineupBoard({ teams, scorers, motm, pickMode, onPlayerPick, score, context }) {
-  return (
-    <div className="lineup-board">
-      {teams.map((team) => (
-        <div className="lineup-side" key={team}>
-          <div className="lineup-title">
-            <TeamBadge team={team} />
-            <span>4-2-3-1</span>
-          </div>
-          <div className="pitch">
-            {(lineups[team] ?? fallbackLineup(team)).map(([number, name, position, goals, row, col]) => {
-              const teamGoals = team === context.home ? score.homeScore : score.awayScore
-              const teamScorerCount = countScorersForTeam(scorers, team, teams)
-              const disabledScorer = pickMode === 'scorer' && teamGoals < 1
-              const cappedScorer = pickMode === 'scorer' && !scorers.includes(name) && teamScorerCount >= teamGoals
-              const renderedCol = 6 - col
-              return (
-              <button
-                className={`player-node ${scorers.includes(name) ? 'scorer-pick' : ''} ${motm === name ? 'motm-pick' : ''} ${disabledScorer || cappedScorer ? 'disabled-pick' : ''}`}
-                style={{ gridRow: row, gridColumn: renderedCol }}
-                key={`${team}-${number}`}
-                onClick={() => onPlayerPick(name, team)}
-                disabled={disabledScorer || cappedScorer}
-                title={disabledScorer ? `${team} has no predicted goals` : cappedScorer ? `${team} already has ${teamGoals} scorer pick${teamGoals === 1 ? '' : 's'}` : `Pick ${name}`}
-              >
-                <strong>{number}</strong>
-                <span>{name}</span>
-                <small>{position} - {goals}G</small>
-                {(scorers.includes(name) || motm === name) && <em>{motm === name ? 'MOTM' : pickMode === 'scorer' ? 'Goal' : 'Pick'}</em>}
-              </button>
-              )
-            })}
-          </div>
-        </div>
-      ))}
     </div>
   )
 }
@@ -766,6 +778,82 @@ function Leaderboard({ title, subtitle, rows, global = false }) {
           <strong>{row.total}</strong>
         </div>
       ))}
+    </div>
+  )
+}
+
+function AccountPanel({ profile, draft, setDraft, onSave, lastSavedAt, predictionCount }) {
+  return (
+    <div className="panel account-panel">
+      <div className="panel-head">
+        <div>
+          <p className="eyebrow">Account foundation</p>
+          <h2>Beta profile</h2>
+        </div>
+        <span className="pill"><UserRound size={14} /> {profile.displayName}</span>
+      </div>
+      <div className="form-grid">
+        <label>
+          Display name
+          <input
+            value={draft.displayName}
+            onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))}
+          />
+        </label>
+        <label>
+          Email
+          <input
+            value={draft.email}
+            onChange={(event) => setDraft((current) => ({ ...current, email: event.target.value }))}
+          />
+        </label>
+      </div>
+      <div className="account-summary">
+        <span>{predictionCount} saved predictions</span>
+        <span>{lastSavedAt ? `Last saved ${new Date(lastSavedAt).toLocaleTimeString()}` : 'No saved pick yet'}</span>
+      </div>
+      <button className="full-button" onClick={onSave}><Save size={16} /> Save beta profile</button>
+    </div>
+  )
+}
+
+function LeagueManager({ league, leagueName, setLeagueName, inviteCode, setInviteCode, onCreate, onJoin }) {
+  return (
+    <div className="panel league-manager">
+      <div className="panel-head">
+        <div>
+          <p className="eyebrow">Private leagues</p>
+          <h2>{league.name}</h2>
+        </div>
+        <span className="pill">{league.inviteCode}</span>
+      </div>
+      <div className="form-grid">
+        <label>
+          League name
+          <input value={leagueName} onChange={(event) => setLeagueName(event.target.value)} />
+        </label>
+        <label>
+          Invite code
+          <input value={inviteCode} onChange={(event) => setInviteCode(event.target.value)} placeholder={league.inviteCode} />
+        </label>
+      </div>
+      <div className="button-row">
+        <button className="full-button" onClick={onCreate}><Sparkles size={16} /> Create league</button>
+        <button className="full-button secondary" onClick={onJoin}><Users size={16} /> Join code</button>
+      </div>
+      <div className="member-list">
+        {league.members.map((member) => (
+          <div key={member.id}>
+            <strong>{member.displayName}</strong>
+            <span>{member.role}</span>
+          </div>
+        ))}
+      </div>
+      <div className="activity-feed">
+        {league.activity.slice(0, 4).map((activity) => (
+          <p key={activity.id}>{activity.text}</p>
+        ))}
+      </div>
     </div>
   )
 }
@@ -815,37 +903,63 @@ function ApiView() {
       <div className="panel wide">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Provider plan</p>
-            <h2>API-ready data adapter</h2>
+            <p className="eyebrow">Production foundation</p>
+            <h2>Supabase and football data adapters</h2>
           </div>
-          <span className="pill live"><Activity size={14} /> Mock now, Sportmonks-shaped later</span>
+          <span className="pill live"><Activity size={14} /> {runtimeMode}</span>
+        </div>
+        <div className="readiness-grid">
+          {productionChecklist.map((item) => (
+            <div className="readiness-card" key={item.label}>
+              <strong>{item.label}</strong>
+              <span>{item.state}</span>
+              <p>{item.detail}</p>
+            </div>
+          ))}
         </div>
         <div className="api-map">
-          {['fixtures', 'groups', 'standings', 'lineups', 'events', 'players', 'brackets', 'leaderboards'].map((item) => (
+          {footballProviderReadiness.resources.map((item) => (
             <div key={item}>
               <Code2 size={16} />
               <strong>{item}</strong>
-              <span>mapped resource</span>
+              <span>normalized table</span>
             </div>
+          ))}
+        </div>
+        <div className="provider-grid">
+          {footballProviderReadiness.trials.map((provider) => (
+            <article key={provider.id}>
+              <strong>{provider.label}</strong>
+              <span>{provider.status}</span>
+              <p>{provider.strengths}</p>
+              <small>{provider.nextCheck}</small>
+            </article>
           ))}
         </div>
         <div className="note-list">
           {apiNotes.map((note) => <p key={note}>{note}</p>)}
+          <p>Supabase schema: supabase/migrations/202604280001_initial_schema.sql</p>
+          <p>Sync function scaffold: supabase/functions/sync-football-data</p>
         </div>
       </div>
       <aside className="panel">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Fallbacks</p>
-            <h2>What to verify</h2>
+            <p className="eyebrow">Beta launch gates</p>
+            <h2>What must become real</h2>
           </div>
         </div>
         <div className="check-list">
-          <span><Check size={16} /> World Cup fixtures now</span>
-          <span><Check size={16} /> Group standings</span>
-          <span><Check size={16} /> Lineups and formations</span>
-          <span><Check size={16} /> Live goals, cards, subs</span>
-          <span><CircleHelp size={16} /> Latency and licensing</span>
+          <span><Check size={16} /> Local saved predictions</span>
+          <span><Check size={16} /> Local beta leagues</span>
+          <span><Check size={16} /> Normalized schema drafted</span>
+          <span><RefreshCw size={16} /> Provider trials pending keys</span>
+          <span><CircleHelp size={16} /> Supabase project not connected</span>
+        </div>
+        <div className="config-card">
+          <strong>Runtime config</strong>
+          <span>Supabase: {hasSupabaseConfig ? 'configured' : 'missing env'}</span>
+          <span>Provider: {appConfig.dataProvider}</span>
         </div>
       </aside>
     </section>
