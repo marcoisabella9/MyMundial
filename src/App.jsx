@@ -24,6 +24,8 @@ import { apiNotes, awards, friends, groupMatchEvents, groups, liveEvents, teamMe
 import { appConfig, hasSupabaseConfig, productionChecklist, runtimeMode } from './lib/config'
 import { footballProviderReadiness } from './lib/football'
 import { betaStore } from './lib/localBetaStore'
+import { supabase } from './lib/supabaseClient'
+import { supabaseMvpStore } from './lib/supabaseMvpStore'
 
 const navItems = [
   { id: 'groups', label: 'Groups', icon: BarChart3 },
@@ -80,6 +82,37 @@ const initialGroupScores = Object.fromEntries(
     },
   ]),
 )
+
+function hydrateScoresFromPredictions(predictions) {
+  const groupScores = { ...initialGroupScores }
+  const bracketScores = {}
+  predictions.forEach((prediction) => {
+    const score = {
+      home: prediction.homeTeam,
+      away: prediction.awayTeam,
+      homeScore: prediction.predictedHomeScore,
+      awayScore: prediction.predictedAwayScore,
+      touched: true,
+      ...(prediction.advancingTeam ? { advancerTeam: prediction.advancingTeam } : {}),
+    }
+    if (prediction.fixtureType === 'group' && groupScores[prediction.fixtureId]) {
+      groupScores[prediction.fixtureId] = { ...groupScores[prediction.fixtureId], ...score }
+    }
+    if (prediction.fixtureType === 'bracket') {
+      bracketScores[prediction.fixtureId] = score
+    }
+  })
+  return { groupScores, bracketScores }
+}
+
+function latestPredictionTime(predictions) {
+  const latest = predictions
+    .map((prediction) => prediction.updatedAt)
+    .filter(Boolean)
+    .sort()
+    .at(-1)
+  return latest ?? null
+}
 
 const defaultMatchContext = {
   id: 'A-1',
@@ -170,6 +203,10 @@ function buildStandings(groupScores) {
 
 function App() {
   const [view, setView] = useState('groups')
+  const [session, setSession] = useState(null)
+  const [authMode, setAuthMode] = useState('sign-in')
+  const [authForm, setAuthForm] = useState({ displayName: '', email: '', password: '' })
+  const [authStatus, setAuthStatus] = useState({ loading: Boolean(supabase), message: '', error: '' })
   const [profile, setProfile] = useState(() => betaStore.loadProfile())
   const [profileDraft, setProfileDraft] = useState(() => betaStore.loadProfile())
   const [league, setLeague] = useState(() => betaStore.loadLeague())
@@ -181,6 +218,78 @@ function App() {
   const [bracketScores, setBracketScores] = useState(() => betaStore.loadBracketScores())
   const [selectedAward, setSelectedAward] = useState('potm')
   const [matchContext, setMatchContext] = useState(defaultMatchContext)
+  const currentUser = session?.user ?? null
+  const isSignedIn = Boolean(currentUser)
+  const persistenceMode = isSignedIn ? 'supabase' : 'local'
+
+  useEffect(() => {
+    if (!supabase) return undefined
+    let isMounted = true
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!isMounted) return
+      if (error) {
+        setAuthStatus({ loading: false, message: '', error: error.message })
+        return
+      }
+      setSession(data.session)
+      setAuthStatus((current) => ({ ...current, loading: false }))
+    })
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession)
+    })
+    return () => {
+      isMounted = false
+      listener.subscription.unsubscribe()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!currentUser) return
+    let isMounted = true
+    async function loadRemoteState() {
+      setAuthStatus({ loading: true, message: 'Syncing your MyMundial account...', error: '' })
+      try {
+        const nextProfile = await supabaseMvpStore.ensureProfile(currentUser, profile)
+        const [remotePredictions, remoteLeague] = await Promise.all([
+          supabaseMvpStore.loadPredictions(currentUser),
+          supabaseMvpStore.loadLeague(currentUser),
+        ])
+        if (!isMounted) return
+        setProfile(nextProfile)
+        setProfileDraft(nextProfile)
+        setAuthForm((current) => ({
+          ...current,
+          displayName: nextProfile.displayName,
+          email: nextProfile.email,
+          password: '',
+        }))
+        if (remoteLeague) {
+          setLeague(remoteLeague)
+          setLeagueName(remoteLeague.name)
+        }
+        if (remotePredictions.length > 0) {
+          const hydrated = hydrateScoresFromPredictions(remotePredictions)
+          setGroupScores(hydrated.groupScores)
+          setBracketScores(hydrated.bracketScores)
+        }
+        setPredictionCount(remotePredictions.length)
+        setLastSavedAt(latestPredictionTime(remotePredictions))
+        setAuthStatus({
+          loading: false,
+          message: remotePredictions.length > 0 ? 'Synced saved picks from Supabase.' : 'Signed in. Save a pick to sync it.',
+          error: '',
+        })
+      } catch (error) {
+        if (!isMounted) return
+        setAuthStatus({ loading: false, message: '', error: error.message })
+      }
+    }
+    loadRemoteState()
+    return () => {
+      isMounted = false
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id])
 
   useEffect(() => {
     betaStore.saveGroupScores(groupScores)
@@ -465,33 +574,131 @@ function App() {
     }
   }
 
-  function saveProfile() {
-    const nextProfile = betaStore.saveProfile(profileDraft)
-    setProfile(nextProfile)
-    setProfileDraft(nextProfile)
-    setLeague(betaStore.loadLeague())
+  async function handleAuthSubmit(event) {
+    event.preventDefault()
+    if (!hasSupabaseConfig) {
+      setAuthStatus({ loading: false, message: '', error: 'Add Supabase env vars before signing in.' })
+      return
+    }
+    setAuthStatus({ loading: true, message: authMode === 'sign-up' ? 'Creating account...' : 'Signing in...', error: '' })
+    try {
+      const email = authForm.email.trim()
+      const password = authForm.password
+      const nextSession = authMode === 'sign-up'
+        ? await supabaseMvpStore.signUp(email, password, authForm.displayName.trim())
+        : await supabaseMvpStore.signIn(email, password)
+      if (nextSession) setSession(nextSession)
+      setAuthStatus({
+        loading: false,
+        message: nextSession ? 'Signed in and syncing picks.' : 'Account created. Check your email if confirmation is required.',
+        error: '',
+      })
+      setAuthForm((current) => ({ ...current, password: '' }))
+    } catch (error) {
+      setAuthStatus({ loading: false, message: '', error: error.message })
+    }
   }
 
-  function createLeague() {
-    setLeague(betaStore.createLeague(leagueName, profile))
+  async function handleSignOut() {
+    setAuthStatus({ loading: true, message: 'Signing out...', error: '' })
+    try {
+      await supabaseMvpStore.signOut()
+      setSession(null)
+      setProfile(betaStore.loadProfile())
+      setProfileDraft(betaStore.loadProfile())
+      setLeague(betaStore.loadLeague())
+      setGroupScores(betaStore.loadGroupScores(initialGroupScores))
+      setBracketScores(betaStore.loadBracketScores())
+      setPredictionCount(betaStore.countPredictions())
+      setLastSavedAt(betaStore.lastSavedAt())
+      setAuthStatus({ loading: false, message: 'Signed out. Local beta mode is active.', error: '' })
+    } catch (error) {
+      setAuthStatus({ loading: false, message: '', error: error.message })
+    }
   }
 
-  function joinLeague() {
-    setLeague(betaStore.joinLeague(inviteCode, profile))
-    setInviteCode('')
+  async function saveProfile() {
+    try {
+      if (isSignedIn) {
+        const nextProfile = await supabaseMvpStore.saveProfile(currentUser, profileDraft)
+        setProfile(nextProfile)
+        setProfileDraft(nextProfile)
+        setAuthStatus({ loading: false, message: 'Profile saved to Supabase.', error: '' })
+        return
+      }
+      const nextProfile = betaStore.saveProfile(profileDraft)
+      setProfile(nextProfile)
+      setProfileDraft(nextProfile)
+      setLeague(betaStore.loadLeague())
+    } catch (error) {
+      setAuthStatus({ loading: false, message: '', error: error.message })
+    }
   }
 
-  function saveCurrentPrediction(locked = false) {
+  async function createLeague() {
+    try {
+      if (isSignedIn) {
+        const remoteLeague = await supabaseMvpStore.createLeague(leagueName, profile, currentUser)
+        setLeague(remoteLeague)
+        setLeagueName(remoteLeague.name)
+        setAuthStatus({ loading: false, message: 'Private league created in Supabase.', error: '' })
+        return
+      }
+      setLeague(betaStore.createLeague(leagueName, profile))
+    } catch (error) {
+      setAuthStatus({ loading: false, message: '', error: error.message })
+    }
+  }
+
+  async function joinLeague() {
+    try {
+      if (isSignedIn) {
+        const remoteLeague = await supabaseMvpStore.joinLeague(inviteCode || league.inviteCode, currentUser)
+        setLeague(remoteLeague)
+        setLeagueName(remoteLeague.name)
+        setAuthStatus({ loading: false, message: `Joined ${remoteLeague.name}.`, error: '' })
+        setInviteCode('')
+        return
+      }
+      setLeague(betaStore.joinLeague(inviteCode, profile))
+      setInviteCode('')
+    } catch (error) {
+      setAuthStatus({ loading: false, message: '', error: error.message })
+    }
+  }
+
+  async function saveCurrentPrediction(locked = false) {
     markCurrentScoreTouched()
-    betaStore.savePrediction({
-      profile,
-      context: matchContext,
-      score: activeScore,
-      locked,
-    })
-    setPredictionCount(betaStore.countPredictions())
-    setLastSavedAt(betaStore.lastSavedAt())
-    setLeague(betaStore.loadLeague())
+    const scoreToSave = { ...activeScore, touched: true }
+    try {
+      if (isSignedIn) {
+        await supabaseMvpStore.savePrediction({
+          profile,
+          context: matchContext,
+          score: scoreToSave,
+          locked,
+          league,
+        })
+        const remotePredictions = await supabaseMvpStore.loadPredictions(currentUser)
+        const remoteLeague = await supabaseMvpStore.loadLeague(currentUser)
+        setPredictionCount(remotePredictions.length)
+        setLastSavedAt(latestPredictionTime(remotePredictions))
+        if (remoteLeague) setLeague(remoteLeague)
+        setAuthStatus({ loading: false, message: locked ? 'Pick locked in Supabase.' : 'Prediction saved to Supabase.', error: '' })
+        return
+      }
+      betaStore.savePrediction({
+        profile,
+        context: matchContext,
+        score: scoreToSave,
+        locked,
+      })
+      setPredictionCount(betaStore.countPredictions())
+      setLastSavedAt(betaStore.lastSavedAt())
+      setLeague(betaStore.loadLeague())
+    } catch (error) {
+      setAuthStatus({ loading: false, message: '', error: error.message })
+    }
   }
 
   return (
@@ -519,7 +726,7 @@ function App() {
           })}
         </nav>
         <div className="side-card">
-          <span>{runtimeMode === 'local-beta' ? 'Local beta mode' : 'Supabase ready'}</span>
+          <span>{persistenceMode === 'supabase' ? 'Supabase account' : runtimeMode === 'local-beta' ? 'Local beta mode' : 'Sign in to sync'}</span>
           <strong>{predictionCount}</strong>
           <small>saved predictions</small>
         </div>
@@ -532,7 +739,7 @@ function App() {
             <h1>MyMundial V1: scores, brackets, private leagues, and awards</h1>
           </div>
           <div className="top-actions">
-            <button onClick={() => setView('leagues')}><Users size={16} /> {league.name}</button>
+            <button onClick={() => setView('leagues')}><Users size={16} /> {isSignedIn ? profile.displayName : league.name}</button>
             <button className="primary" onClick={() => saveCurrentPrediction(true)}><Sparkles size={16} /> Lock draft</button>
           </div>
         </header>
@@ -626,6 +833,15 @@ function App() {
                 onSave={saveProfile}
                 lastSavedAt={lastSavedAt}
                 predictionCount={predictionCount}
+                hasSupabaseConfig={hasSupabaseConfig}
+                isSignedIn={isSignedIn}
+                authMode={authMode}
+                setAuthMode={setAuthMode}
+                authForm={authForm}
+                setAuthForm={setAuthForm}
+                authStatus={authStatus}
+                onAuthSubmit={handleAuthSubmit}
+                onSignOut={handleSignOut}
               />
               <LeagueManager
                 league={league}
@@ -900,16 +1116,96 @@ function Leaderboard({ title, subtitle, rows, global = false }) {
   )
 }
 
-function AccountPanel({ profile, draft, setDraft, onSave, lastSavedAt, predictionCount }) {
+function AccountPanel({
+  profile,
+  draft,
+  setDraft,
+  onSave,
+  lastSavedAt,
+  predictionCount,
+  hasSupabaseConfig,
+  isSignedIn,
+  authMode,
+  setAuthMode,
+  authForm,
+  setAuthForm,
+  authStatus,
+  onAuthSubmit,
+  onSignOut,
+}) {
   return (
     <div className="panel account-panel">
       <div className="panel-head">
         <div>
           <p className="eyebrow">Account foundation</p>
-          <h2>Beta profile</h2>
+          <h2>{isSignedIn ? 'Supabase profile' : 'Sign in to sync'}</h2>
         </div>
-        <span className="pill"><UserRound size={14} /> {profile.displayName}</span>
+        <span className="pill"><UserRound size={14} /> {isSignedIn ? profile.displayName : 'Local beta'}</span>
       </div>
+      {!hasSupabaseConfig && (
+        <div className="auth-note">
+          Add Supabase URL and anon key to enable accounts.
+        </div>
+      )}
+      {hasSupabaseConfig && !isSignedIn && (
+        <form className="auth-card" onSubmit={onAuthSubmit}>
+          <div className="auth-tabs">
+            <button type="button" className={authMode === 'sign-in' ? 'selected' : ''} onClick={() => setAuthMode('sign-in')}>Sign in</button>
+            <button type="button" className={authMode === 'sign-up' ? 'selected' : ''} onClick={() => setAuthMode('sign-up')}>Create account</button>
+          </div>
+          <div className="form-grid">
+            {authMode === 'sign-up' && (
+              <label>
+                Display name
+                <input
+                  value={authForm.displayName}
+                  onChange={(event) => setAuthForm((current) => ({ ...current, displayName: event.target.value }))}
+                  placeholder="Marco"
+                />
+              </label>
+            )}
+            <label>
+              Email
+              <input
+                type="email"
+                value={authForm.email}
+                onChange={(event) => setAuthForm((current) => ({ ...current, email: event.target.value }))}
+                placeholder="you@example.com"
+                required
+              />
+            </label>
+            <label>
+              Password
+              <input
+                type="password"
+                value={authForm.password}
+                onChange={(event) => setAuthForm((current) => ({ ...current, password: event.target.value }))}
+                placeholder="At least 6 characters"
+                required
+                minLength={6}
+              />
+            </label>
+          </div>
+          <button className="full-button" type="submit" disabled={authStatus.loading}>
+            <UserRound size={16} />
+            {authStatus.loading ? 'Working...' : authMode === 'sign-up' ? 'Create account' : 'Sign in'}
+          </button>
+        </form>
+      )}
+      {isSignedIn && (
+        <div className="auth-card signed-in-card">
+          <div>
+            <strong>{profile.email}</strong>
+            <span>Predictions and leagues sync to Supabase.</span>
+          </div>
+          <button className="secondary" onClick={onSignOut} disabled={authStatus.loading}>Sign out</button>
+        </div>
+      )}
+      {(authStatus.message || authStatus.error) && (
+        <p className={`auth-message ${authStatus.error ? 'error' : ''}`}>
+          {authStatus.error || authStatus.message}
+        </p>
+      )}
       <div className="form-grid">
         <label>
           Display name
@@ -930,7 +1226,7 @@ function AccountPanel({ profile, draft, setDraft, onSave, lastSavedAt, predictio
         <span>{predictionCount} saved predictions</span>
         <span>{lastSavedAt ? `Last saved ${new Date(lastSavedAt).toLocaleTimeString()}` : 'No saved pick yet'}</span>
       </div>
-      <button className="full-button" onClick={onSave}><Save size={16} /> Save beta profile</button>
+      <button className="full-button" onClick={onSave}><Save size={16} /> {isSignedIn ? 'Save Supabase profile' : 'Save beta profile'}</button>
     </div>
   )
 }

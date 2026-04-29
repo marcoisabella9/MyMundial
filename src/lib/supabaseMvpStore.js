@@ -1,0 +1,274 @@
+import { supabase } from './supabaseClient'
+
+function profileFromUser(user, fallbackProfile = {}) {
+  const email = user?.email ?? fallbackProfile.email ?? ''
+  return {
+    id: user?.id ?? fallbackProfile.id,
+    displayName:
+      fallbackProfile.displayName
+      ?? user?.user_metadata?.display_name
+      ?? email.split('@')[0]
+      ?? 'MyMundial user',
+    email,
+    favoriteTeam: fallbackProfile.favoriteTeam ?? 'Mexico',
+  }
+}
+
+function rowToProfile(row, user, fallbackProfile) {
+  if (!row) return profileFromUser(user, fallbackProfile)
+  return {
+    id: row.id,
+    displayName: row.display_name,
+    email: row.email ?? user?.email ?? '',
+    favoriteTeam: fallbackProfile?.favoriteTeam ?? 'Mexico',
+  }
+}
+
+function inviteFromName(name) {
+  const base = (name || 'MYMUNDIAL').replace(/[^a-z0-9]/gi, '').slice(0, 8).toUpperCase()
+  return `${base || 'MYMUND'}${Math.floor(1000 + Math.random() * 9000)}`
+}
+
+function summarizePrediction(prediction) {
+  const score = `${prediction.homeTeam} ${prediction.predictedHomeScore}-${prediction.predictedAwayScore} ${prediction.awayTeam}`
+  return prediction.advancingTeam ? `${score}, ${prediction.advancingTeam} advances` : score
+}
+
+function predictionFromRow(row) {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    fixtureId: row.fixture_key,
+    fixtureType: row.fixture_type,
+    stage: row.stage,
+    homeTeam: row.home_team,
+    awayTeam: row.away_team,
+    predictedHomeScore: row.predicted_home_score,
+    predictedAwayScore: row.predicted_away_score,
+    advancingTeam: row.advancing_team,
+    lockedAt: row.locked_at,
+    updatedAt: row.updated_at,
+    resultState: row.result_state,
+  }
+}
+
+function leagueFromRows(league, members = [], activity = []) {
+  if (!league) return null
+  return {
+    id: league.id,
+    name: league.name,
+    inviteCode: league.invite_code,
+    members: members.map((member) => ({
+      id: member.user_id,
+      displayName: member.profiles?.display_name ?? 'Member',
+      role: member.role,
+      points: 0,
+    })),
+    activity: activity.map((item) => ({
+      id: item.id,
+      text: activityText(item),
+      createdAt: item.created_at,
+    })),
+  }
+}
+
+function activityText(item) {
+  const actor = item.profiles?.display_name ?? 'A member'
+  if (item.activity_type === 'created') return `${actor} created this league.`
+  if (item.activity_type === 'joined') return `${actor} joined the league.`
+  if (item.activity_type === 'prediction_saved') {
+    return `${actor} saved ${item.metadata?.summary ?? 'a prediction'}.`
+  }
+  return `${actor} updated the league.`
+}
+
+async function requireClient() {
+  if (!supabase) throw new Error('Supabase is not configured')
+  return supabase
+}
+
+export const supabaseMvpStore = {
+  async signIn(email, password) {
+    const client = await requireClient()
+    const { data, error } = await client.auth.signInWithPassword({ email, password })
+    if (error) throw error
+    return data.session
+  },
+
+  async signUp(email, password, displayName) {
+    const client = await requireClient()
+    const { data, error } = await client.auth.signUp({
+      email,
+      password,
+      options: { data: { display_name: displayName } },
+    })
+    if (error) throw error
+    if (data.user && data.session) await this.ensureProfile(data.user, { displayName, email })
+    return data.session
+  },
+
+  async signOut() {
+    const client = await requireClient()
+    const { error } = await client.auth.signOut()
+    if (error) throw error
+  },
+
+  async ensureProfile(user, fallbackProfile) {
+    const client = await requireClient()
+    const fallback = profileFromUser(user, fallbackProfile)
+    const { data, error } = await client
+      .from('profiles')
+      .upsert({
+        id: user.id,
+        display_name: fallback.displayName,
+        email: fallback.email,
+      }, { onConflict: 'id' })
+      .select()
+      .single()
+    if (error) throw error
+    return rowToProfile(data, user, fallback)
+  },
+
+  async saveProfile(user, profile) {
+    const client = await requireClient()
+    const { data, error } = await client
+      .from('profiles')
+      .upsert({
+        id: user.id,
+        display_name: profile.displayName?.trim() || 'MyMundial user',
+        email: profile.email?.trim() || user.email,
+      }, { onConflict: 'id' })
+      .select()
+      .single()
+    if (error) throw error
+    return rowToProfile(data, user, profile)
+  },
+
+  async loadProfile(user, fallbackProfile) {
+    const client = await requireClient()
+    const { data, error } = await client.from('profiles').select('*').eq('id', user.id).maybeSingle()
+    if (error) throw error
+    return data ? rowToProfile(data, user, fallbackProfile) : this.ensureProfile(user, fallbackProfile)
+  },
+
+  async loadLeague(user) {
+    const client = await requireClient()
+    const { data: membership, error: membershipError } = await client
+      .from('league_members')
+      .select('league_id')
+      .eq('user_id', user.id)
+      .order('joined_at', { ascending: true })
+      .limit(1)
+      .maybeSingle()
+    if (membershipError) throw membershipError
+    if (!membership) return null
+
+    const { data: league, error: leagueError } = await client
+      .from('leagues')
+      .select('*')
+      .eq('id', membership.league_id)
+      .single()
+    if (leagueError) throw leagueError
+
+    const { data: members, error: membersError } = await client
+      .from('league_members')
+      .select('user_id, role, profiles(display_name)')
+      .eq('league_id', league.id)
+      .order('joined_at', { ascending: true })
+    if (membersError) throw membersError
+
+    const { data: activity, error: activityError } = await client
+      .from('league_activity')
+      .select('id, activity_type, metadata, created_at, profiles(display_name)')
+      .eq('league_id', league.id)
+      .order('created_at', { ascending: false })
+      .limit(8)
+    if (activityError) throw activityError
+
+    return leagueFromRows(league, members, activity)
+  },
+
+  async createLeague(name, profile, user) {
+    const client = await requireClient()
+    const inviteCode = inviteFromName(name)
+    const { data: league, error: leagueError } = await client
+      .from('leagues')
+      .insert({
+        owner_id: user.id,
+        name: name?.trim() || 'MyMundial private league',
+        invite_code: inviteCode,
+      })
+      .select()
+      .single()
+    if (leagueError) throw leagueError
+
+    const { error: memberError } = await client.from('league_members').insert({
+      league_id: league.id,
+      user_id: user.id,
+      role: 'owner',
+    })
+    if (memberError) throw memberError
+
+    await client.from('league_activity').insert({
+      league_id: league.id,
+      actor_id: user.id,
+      activity_type: 'created',
+      metadata: { name: league.name, display_name: profile.displayName },
+    })
+
+    return this.loadLeague(user)
+  },
+
+  async joinLeague(inviteCode, user) {
+    const client = await requireClient()
+    const { error } = await client.rpc('join_league_by_invite', { target_invite_code: inviteCode })
+    if (error) throw error
+    return this.loadLeague(user)
+  },
+
+  async savePrediction({ profile, context, score, locked, league }) {
+    const client = await requireClient()
+    const advancingTeam = score.advancerTeam
+      ?? (score.homeScore > score.awayScore ? context.home : score.homeScore < score.awayScore ? context.away : null)
+    const { data, error } = await client
+      .from('mvp_prediction_drafts')
+      .upsert({
+        user_id: profile.id,
+        fixture_key: context.id,
+        fixture_type: context.type,
+        stage: context.stage,
+        home_team: context.home,
+        away_team: context.away,
+        predicted_home_score: score.homeScore,
+        predicted_away_score: score.awayScore,
+        advancing_team: advancingTeam,
+        locked_at: locked ? new Date().toISOString() : null,
+        result_state: locked ? 'locked' : 'draft',
+      }, { onConflict: 'user_id,fixture_key' })
+      .select()
+      .single()
+    if (error) throw error
+
+    const prediction = predictionFromRow(data)
+    if (league?.id) {
+      await client.from('league_activity').insert({
+        league_id: league.id,
+        actor_id: profile.id,
+        activity_type: 'prediction_saved',
+        metadata: { fixture_key: context.id, summary: summarizePrediction(prediction) },
+      })
+    }
+    return prediction
+  },
+
+  async loadPredictions(user) {
+    const client = await requireClient()
+    const { data, error } = await client
+      .from('mvp_prediction_drafts')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('updated_at', { ascending: false })
+    if (error) throw error
+    return data.map(predictionFromRow)
+  },
+}
