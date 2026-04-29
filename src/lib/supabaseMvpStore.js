@@ -34,6 +34,24 @@ function summarizePrediction(prediction) {
   return prediction.advancingTeam ? `${score}, ${prediction.advancingTeam} advances` : score
 }
 
+function predictionRow({ profile, context, score, locked }) {
+  const advancingTeam = score.advancerTeam
+    ?? (score.homeScore > score.awayScore ? context.home : score.homeScore < score.awayScore ? context.away : null)
+  return {
+    user_id: profile.id,
+    fixture_key: context.id,
+    fixture_type: context.type,
+    stage: context.stage,
+    home_team: context.home,
+    away_team: context.away,
+    predicted_home_score: score.homeScore,
+    predicted_away_score: score.awayScore,
+    advancing_team: advancingTeam,
+    locked_at: locked ? new Date().toISOString() : null,
+    result_state: locked ? 'locked' : 'draft',
+  }
+}
+
 function predictionFromRow(row) {
   return {
     id: row.id,
@@ -239,23 +257,9 @@ export const supabaseMvpStore = {
 
   async savePrediction({ profile, context, score, locked, league }) {
     const client = await requireClient()
-    const advancingTeam = score.advancerTeam
-      ?? (score.homeScore > score.awayScore ? context.home : score.homeScore < score.awayScore ? context.away : null)
     const { data, error } = await client
       .from('mvp_prediction_drafts')
-      .upsert({
-        user_id: profile.id,
-        fixture_key: context.id,
-        fixture_type: context.type,
-        stage: context.stage,
-        home_team: context.home,
-        away_team: context.away,
-        predicted_home_score: score.homeScore,
-        predicted_away_score: score.awayScore,
-        advancing_team: advancingTeam,
-        locked_at: locked ? new Date().toISOString() : null,
-        result_state: locked ? 'locked' : 'draft',
-      }, { onConflict: 'user_id,fixture_key' })
+      .upsert(predictionRow({ profile, context, score, locked }), { onConflict: 'user_id,fixture_key' })
       .select()
       .single()
     if (error) throw error
@@ -270,6 +274,28 @@ export const supabaseMvpStore = {
       })
     }
     return prediction
+  },
+
+  async savePredictions({ profile, items, locked = false, league }) {
+    if (!items.length) return []
+    const client = await requireClient()
+    const rows = items.map((item) => predictionRow({ profile, context: item.context, score: item.score, locked }))
+    const { data, error } = await client
+      .from('mvp_prediction_drafts')
+      .upsert(rows, { onConflict: 'user_id,fixture_key' })
+      .select()
+    if (error) throw error
+
+    const predictions = data.map(predictionFromRow)
+    if (league?.id) {
+      await client.from('league_activity').insert({
+        league_id: league.id,
+        actor_id: profile.id,
+        activity_type: 'prediction_saved',
+        metadata: { summary: `${predictions.length} predictions` },
+      })
+    }
+    return predictions
   },
 
   async loadPredictions(user) {

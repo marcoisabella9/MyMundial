@@ -181,6 +181,48 @@ export const betaStore = {
     return prediction
   },
 
+  savePredictions({ profile, items, locked = false }) {
+    const state = readState()
+    const now = new Date().toISOString()
+    const predictions = Object.fromEntries(items.map(({ context, score }) => {
+      const prediction = {
+        id: predictionKey(profile.id, context.id),
+        userId: profile.id,
+        fixtureId: context.id,
+        fixtureType: context.type,
+        stage: context.stage,
+        homeTeam: context.home,
+        awayTeam: context.away,
+        predictedHomeScore: score.homeScore,
+        predictedAwayScore: score.awayScore,
+        advancingTeam: score.advancerTeam
+          ?? (score.homeScore > score.awayScore ? context.home : score.homeScore < score.awayScore ? context.away : null),
+        lockedAt: locked ? now : null,
+        updatedAt: now,
+        resultState: locked ? 'locked' : 'draft',
+      }
+      return [prediction.id, prediction]
+    }))
+    const league = {
+      ...state.league,
+      activity: [
+        {
+          id: `activity-${Date.now()}`,
+          text: `${profile.displayName} saved ${Object.keys(predictions).length} predictions.`,
+          createdAt: now,
+        },
+        ...state.league.activity.slice(0, 7),
+      ],
+    }
+    writeState({
+      ...state,
+      league,
+      predictions: { ...state.predictions, ...predictions },
+      lastSavedAt: now,
+    })
+    return Object.values(predictions)
+  },
+
   loadPredictions() {
     return Object.values(readState().predictions ?? {})
   },

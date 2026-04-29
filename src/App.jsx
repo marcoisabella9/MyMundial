@@ -228,6 +228,7 @@ function App() {
   const [authForm, setAuthForm] = useState({ displayName: '', email: '', password: '' })
   const [authStatus, setAuthStatus] = useState({ loading: Boolean(supabase), message: '', error: '' })
   const [saveStatus, setSaveStatus] = useState({ loading: false, message: '', error: '' })
+  const [bulkSaveStatus, setBulkSaveStatus] = useState({ loading: false, message: '', error: '' })
   const [awardSaveStatus, setAwardSaveStatus] = useState({ loading: false, message: '', error: '' })
   const [profile, setProfile] = useState(() => betaStore.loadProfile())
   const [profileDraft, setProfileDraft] = useState(() => betaStore.loadProfile())
@@ -475,6 +476,38 @@ function App() {
     ]
   }, [playableQualifierBySeed, bracketScores])
 
+  const groupMatchContexts = useMemo(() => groupMatchups.map((match) => ({
+    id: match.id,
+    type: 'group',
+    stage: `Group ${match.group}`,
+    home: match.home,
+    away: match.away,
+    venue: match.venue,
+    date: `${match.date} - prediction open`,
+    events: groupMatchEvents,
+    backView: 'groups',
+  })), [])
+
+  const knockoutMatchContexts = useMemo(() => bracketRounds.flatMap(([round, matches]) =>
+    matches
+      .filter((match) => match.a?.team && match.b?.team)
+      .map((match) => ({
+        id: match.id,
+        type: 'bracket',
+        stage: match.label ?? round,
+        home: match.a.team,
+        away: match.b.team,
+        venue: match.label === 'Final' ? 'New York New Jersey Stadium' : match.label === '3rd Place' ? 'Hard Rock Stadium' : 'Mercedes-Benz Stadium',
+        date: 'Sat, Jul 4 - 9:00 PM',
+        events: liveEvents,
+        backView: 'bracket',
+        fallbackHome: match.fallbackHome,
+        fallbackAway: match.fallbackAway,
+      })),
+  ), [bracketRounds])
+
+  const matchSequence = useMemo(() => [...groupMatchContexts, ...knockoutMatchContexts], [groupMatchContexts, knockoutMatchContexts])
+
   function scoreForContext(context) {
     if (context.type === 'group') return groupScores[context.id]
     return bracketScores[context.id] ?? {
@@ -499,38 +532,9 @@ function App() {
   }
 
   function goToAdjacentMatch(direction) {
-    const groupContexts = groupMatchups.map((match) => ({
-      id: match.id,
-      type: 'group',
-      stage: `Group ${match.group}`,
-      home: match.home,
-      away: match.away,
-      venue: match.venue,
-      date: `${match.date} - prediction open`,
-      events: groupMatchEvents,
-      backView: 'groups',
-    }))
-    const knockoutContexts = bracketRounds.flatMap(([round, matches]) =>
-      matches
-        .filter((match) => match.a?.team && match.b?.team)
-        .map((match) => ({
-          id: match.id,
-          type: 'bracket',
-          stage: match.label ?? round,
-          home: match.a.team,
-          away: match.b.team,
-          venue: match.label === 'Final' ? 'New York New Jersey Stadium' : match.label === '3rd Place' ? 'Hard Rock Stadium' : 'Mercedes-Benz Stadium',
-          date: 'Sat, Jul 4 - 9:00 PM',
-          events: liveEvents,
-          backView: 'bracket',
-          fallbackHome: match.fallbackHome,
-          fallbackAway: match.fallbackAway,
-        })),
-    )
-    const sequence = [...groupContexts, ...knockoutContexts]
-    const currentIndex = sequence.findIndex((match) => match.id === matchContext.id)
-    const nextIndex = currentIndex < 0 ? 0 : (currentIndex + direction + sequence.length) % sequence.length
-    openMatch(sequence[nextIndex])
+    const currentIndex = matchSequence.findIndex((match) => match.id === matchContext.id)
+    const nextIndex = currentIndex < 0 ? 0 : (currentIndex + direction + matchSequence.length) % matchSequence.length
+    openMatch(matchSequence[nextIndex])
   }
 
   function updateScore(team, delta) {
@@ -729,6 +733,70 @@ function App() {
     }
   }
 
+  function buildBulkPredictionItems() {
+    const nextGroupScores = Object.fromEntries(groupMatchContexts.map((context) => {
+      const score = groupScores[context.id] ?? {
+        home: context.home,
+        away: context.away,
+        homeScore: 0,
+        awayScore: 0,
+      }
+      return [context.id, {
+        ...score,
+        home: context.home,
+        away: context.away,
+        touched: true,
+      }]
+    }))
+    const groupItems = groupMatchContexts.map((context) => ({
+      context,
+      score: nextGroupScores[context.id],
+    }))
+    const bracketItems = knockoutMatchContexts.map((context) => {
+      const score = {
+        ...scoreForContext(context),
+        home: context.home,
+        away: context.away,
+        touched: true,
+      }
+      const complete = score.homeScore !== score.awayScore || Boolean(score.advancerTeam)
+      return complete ? { context, score } : null
+    }).filter(Boolean)
+    return { items: [...groupItems, ...bracketItems], nextGroupScores, bracketItems }
+  }
+
+  async function saveAllPredictions() {
+    const { items, nextGroupScores, bracketItems } = buildBulkPredictionItems()
+    if (!items.length) return
+    setBulkSaveStatus({ loading: true, message: `Saving ${items.length} picks...`, error: '' })
+    try {
+      setGroupScores(nextGroupScores)
+      if (bracketItems.length) {
+        setBracketScores((current) => ({
+          ...current,
+          ...Object.fromEntries(bracketItems.map(({ context, score }) => [context.id, score])),
+        }))
+      }
+      if (isSignedIn) {
+        await supabaseMvpStore.savePredictions({ profile, items, locked: false, league })
+        const remotePredictions = await supabaseMvpStore.loadPredictions(currentUser)
+        const remoteLeague = await supabaseMvpStore.loadLeague(currentUser)
+        setPredictionCount(remotePredictions.length)
+        setLastSavedAt(latestPredictionTime(remotePredictions))
+        if (remoteLeague) setLeague(remoteLeague)
+        setBulkSaveStatus({ loading: false, message: `${remotePredictions.length} picks synced.`, error: '' })
+        return
+      }
+      betaStore.savePredictions({ profile, items, locked: false })
+      setPredictionCount(betaStore.countPredictions())
+      setLastSavedAt(betaStore.lastSavedAt())
+      setLeague(betaStore.loadLeague())
+      setBulkSaveStatus({ loading: false, message: `${items.length} picks saved locally.`, error: '' })
+    } catch (error) {
+      setBulkSaveStatus({ loading: false, message: '', error: error.message })
+    }
+  }
+
   async function saveAwardPick(award, recipient) {
     setSelectedAward(award.id)
     setAwardSaveStatus({ loading: true, message: `Saving ${award.label}...`, error: '' })
@@ -772,11 +840,20 @@ function App() {
               </button>
             )
           })}
+          <button className="nav-save-all" onClick={saveAllPredictions} disabled={bulkSaveStatus.loading} title="Save all current picks">
+            {bulkSaveStatus.loading ? <RefreshSpinner /> : <Save size={18} />}
+            <span>{bulkSaveStatus.loading ? 'Saving...' : 'Save all'}</span>
+          </button>
         </nav>
         <div className="side-card">
           <span>{persistenceMode === 'supabase' ? 'Supabase account' : runtimeMode === 'local-beta' ? 'Local beta mode' : 'Sign in to sync'}</span>
           <strong>{predictionCount}</strong>
           <small>saved predictions</small>
+          {(bulkSaveStatus.message || bulkSaveStatus.error) && (
+            <small className={bulkSaveStatus.error ? 'side-error' : 'side-success'}>
+              {bulkSaveStatus.error || bulkSaveStatus.message}
+            </small>
+          )}
         </div>
       </aside>
 
@@ -1157,10 +1234,10 @@ function MvpMatchRail({ context, score }) {
     <div className="panel wide mvp-rail">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">V1 launch scope</p>
-          <h2>Score pick and settlement path</h2>
+          <p className="eyebrow">Pick summary</p>
+          <h2>How this match affects your league</h2>
         </div>
-        <span className="pill">No player props in MVP</span>
+        <span className="pill">Scores and bracket picks</span>
       </div>
       <div className="mvp-grid">
         <article>
@@ -1169,22 +1246,10 @@ function MvpMatchRail({ context, score }) {
           <span>{winner}</span>
         </article>
         <article>
-          <strong>Server validation</strong>
-          <p>API-FOOTBALL sync will normalize fixtures, scores, standings, and final results.</p>
-          <span>Provider key stays in Supabase Edge Function secrets.</span>
-        </article>
-        <article>
           <strong>League impact</strong>
           <p>Saved predictions will settle into private league and global leaderboards.</p>
           <span>Winner, exact score, goal difference, bracket, and awards.</span>
         </article>
-      </div>
-      <div className="deferred-card">
-        <Medal size={18} />
-        <div>
-          <strong>Post-MVP player layer</strong>
-          <p>Lineups, scorer picks, MOTM, and live player events are intentionally deferred until the core app is shipped.</p>
-        </div>
       </div>
     </div>
   )
