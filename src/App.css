@@ -476,6 +476,8 @@ h3 {
 }
 
 .round-4 .match-card {
+  width: min(100%, 260px);
+  justify-self: center;
   min-height: 118px;
   border-color: #d7b94d;
   background: linear-gradient(180deg, #ffffff, #fffbea);
@@ -483,6 +485,7 @@ h3 {
 }
 
 .round-4 .match-card:nth-of-type(2) {
+  justify-self: end;
   min-height: 112px;
   border-color: #b78962;
   background: linear-gradient(180deg, #ffffff, #fff6ef);

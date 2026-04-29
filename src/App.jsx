@@ -653,7 +653,7 @@ function App() {
 }
 
 function bracketSlotRow(roundIndex, matchIndex) {
-  if (roundIndex === 4) return matchIndex === 0 ? 16 : 25
+  if (roundIndex === 4) return matchIndex === 0 ? 15 : 31
   const spacing = 2 ** roundIndex
   const offset = Math.max(1, spacing)
   return 3 + (matchIndex * spacing * 2) + offset
