@@ -318,11 +318,12 @@ function App() {
     }))
     sf.forEach((match) => { match.state = matchState(match) })
     sf.forEach((match) => { match.picked = winner(match, match.fallbackHome, match.fallbackAway) })
-    const final = [{ id: 'final-0', a: sf[0]?.picked, b: sf[1]?.picked, state: 'pending', fallbackHome: 0, fallbackAway: 0 }]
+    const final = [{ id: 'final-0', label: 'Final', a: sf[0]?.picked, b: sf[1]?.picked, state: 'pending', fallbackHome: 0, fallbackAway: 0 }]
     final[0].state = matchState(final[0])
     final[0].picked = winner(final[0], 0, 0)
     const thirdPlace = [{
       id: 'third-0',
+      label: '3rd Place',
       a: loser(sf[0], 0, 0),
       b: loser(sf[1], 0, 0),
       state: 'pending',
@@ -336,8 +337,7 @@ function App() {
       ['R16', r16],
       ['QF', qf],
       ['SF', sf],
-      ['Final', final],
-      ['3rd Place', thirdPlace],
+      ['Finals', [...final, ...thirdPlace]],
     ]
   }, [playableQualifierBySeed, bracketScores])
 
@@ -382,10 +382,10 @@ function App() {
         .map((match) => ({
           id: match.id,
           type: 'bracket',
-          stage: round,
+          stage: match.label ?? round,
           home: match.a.team,
           away: match.b.team,
-          venue: round === 'Final' ? 'New York New Jersey Stadium' : round === '3rd Place' ? 'Hard Rock Stadium' : 'Mercedes-Benz Stadium',
+          venue: match.label === 'Final' ? 'New York New Jersey Stadium' : match.label === '3rd Place' ? 'Hard Rock Stadium' : 'Mercedes-Benz Stadium',
           date: 'Sat, Jul 4 - 9:00 PM',
           events: liveEvents,
           backView: 'bracket',
@@ -573,10 +573,10 @@ function App() {
                         onClick={() => openMatch({
                           id: match.id,
                           type: 'bracket',
-                          stage: round,
+                          stage: match.label ?? round,
                           home: match.a?.team ?? 'TBD',
                           away: match.b?.team ?? 'TBD',
-                          venue: round === 'Final' ? 'New York New Jersey Stadium' : round === '3rd Place' ? 'Hard Rock Stadium' : 'Mercedes-Benz Stadium',
+                          venue: match.label === 'Final' ? 'New York New Jersey Stadium' : match.label === '3rd Place' ? 'Hard Rock Stadium' : 'Mercedes-Benz Stadium',
                           date: 'Sat, Jul 4 - 9:00 PM',
                           events: liveEvents,
                           backView: 'bracket',
@@ -584,9 +584,10 @@ function App() {
                           fallbackAway: match.fallbackAway,
                         })}
                       >
+                        {match.label && <span className="match-label">{match.label}</span>}
                         <MatchTeam slot={match.a?.team && match.b?.team ? match.a : undefined} score={(bracketScores[match.id]?.homeScore ?? match.fallbackHome)} picked={match.picked?.team === match.a?.team} />
                         <MatchTeam slot={match.a?.team && match.b?.team ? match.b : undefined} score={(bracketScores[match.id]?.awayScore ?? match.fallbackAway)} picked={match.picked?.team === match.b?.team} />
-                        <span className="match-state">{match.state}</span>
+                        <span className="match-state">{bracketPickLabel(match, bracketScores[match.id])}</span>
                       </button>
                     ))}
                   </div>
@@ -652,11 +653,23 @@ function App() {
 }
 
 function bracketSlotRow(roundIndex, matchIndex) {
-  if (roundIndex === 4) return 19
-  if (roundIndex === 5) return 25
+  if (roundIndex === 4) return matchIndex === 0 ? 16 : 25
   const spacing = 2 ** roundIndex
   const offset = Math.max(1, spacing)
   return 3 + (matchIndex * spacing * 2) + offset
+}
+
+function groupPickLabel(score) {
+  if (!score.touched) return 'No pick'
+  if (score.homeScore === score.awayScore) return 'Draw'
+  return 'Picked'
+}
+
+function bracketPickLabel(match, score) {
+  if (!score) return 'No pick'
+  if (match.state === 'needs winner') return 'Pick advancer'
+  if (score.homeScore === score.awayScore && score.advancerTeam) return `${meta(score.advancerTeam).code} advances`
+  return 'Picked'
 }
 
 function GroupsView({ standings, openMatch, groupScores }) {
@@ -691,7 +704,7 @@ function GroupsView({ standings, openMatch, groupScores }) {
                   const score = groupScores[match.id]
                   return (
                     <button
-                      className="group-match"
+                      className={`group-match ${score.touched ? 'has-pick' : 'no-pick'} ${score.touched && score.homeScore === score.awayScore ? 'draw-pick' : ''}`}
                       key={match.id}
                       onClick={() => openMatch({
                         id: match.id,
@@ -708,6 +721,7 @@ function GroupsView({ standings, openMatch, groupScores }) {
                       <TeamBadge team={match.home} />
                       <strong>{score.homeScore} - {score.awayScore}</strong>
                       <TeamBadge team={match.away} />
+                      <span className="pick-status">{groupPickLabel(score)}</span>
                     </button>
                   )
                 })}
