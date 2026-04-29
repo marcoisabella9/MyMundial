@@ -234,11 +234,28 @@ function App() {
       }
     }
 
+    function matchState(match) {
+      const score = scoreFor(match, match.fallbackHome, match.fallbackAway)
+      if (!score) return 'pending'
+      if (score.homeScore === score.awayScore && !score.advancerTeam) return 'needs winner'
+      return 'picked'
+    }
+
     function winner(match, fallbackHome, fallbackAway) {
       const score = scoreFor(match, fallbackHome, fallbackAway)
       if (!match.a || !match.b || !score) return undefined
-      if (score.homeScore === score.awayScore) return undefined
+      if (score.homeScore === score.awayScore) {
+        if (score.advancerTeam === match.a.team) return match.a
+        if (score.advancerTeam === match.b.team) return match.b
+        return undefined
+      }
       return score.homeScore > score.awayScore ? match.a : match.b
+    }
+
+    function loser(match, fallbackHome, fallbackAway) {
+      const picked = winner(match, fallbackHome, fallbackAway)
+      if (!picked || !match.a || !match.b) return undefined
+      return picked.team === match.a.team ? match.b : match.a
     }
 
     const usedSeeds = new Set()
@@ -264,29 +281,32 @@ function App() {
         id: `r32-${index}`,
         a: homeSlot,
         b: awaySlot,
-        state: bracketScores[`r32-${index}`] ? 'picked' : 'pending',
+        state: 'pending',
         fallbackHome: 0,
         fallbackAway: 0,
       }
     })
+    r32.forEach((match) => { match.state = matchState(match) })
     r32.forEach((match) => { match.picked = winner(match, match.fallbackHome, match.fallbackAway) })
     const r16 = Array.from({ length: 8 }, (_, index) => ({
       id: `r16-${index}`,
       a: r32[index * 2]?.picked,
       b: r32[index * 2 + 1]?.picked,
-      state: bracketScores[`r16-${index}`] ? 'picked' : 'pending',
+      state: 'pending',
       fallbackHome: 0,
       fallbackAway: 0,
     }))
+    r16.forEach((match) => { match.state = matchState(match) })
     r16.forEach((match) => { match.picked = winner(match, match.fallbackHome, match.fallbackAway) })
     const qf = Array.from({ length: 4 }, (_, index) => ({
       id: `qf-${index}`,
       a: r16[index * 2]?.picked,
       b: r16[index * 2 + 1]?.picked,
-      state: bracketScores[`qf-${index}`] ? 'picked' : 'pending',
+      state: 'pending',
       fallbackHome: 0,
       fallbackAway: 0,
     }))
+    qf.forEach((match) => { match.state = matchState(match) })
     qf.forEach((match) => { match.picked = winner(match, match.fallbackHome, match.fallbackAway) })
     const sf = Array.from({ length: 2 }, (_, index) => ({
       id: `sf-${index}`,
@@ -296,15 +316,28 @@ function App() {
       fallbackHome: 0,
       fallbackAway: 0,
     }))
+    sf.forEach((match) => { match.state = matchState(match) })
     sf.forEach((match) => { match.picked = winner(match, match.fallbackHome, match.fallbackAway) })
     const final = [{ id: 'final-0', a: sf[0]?.picked, b: sf[1]?.picked, state: 'pending', fallbackHome: 0, fallbackAway: 0 }]
+    final[0].state = matchState(final[0])
     final[0].picked = winner(final[0], 0, 0)
+    const thirdPlace = [{
+      id: 'third-0',
+      a: loser(sf[0], 0, 0),
+      b: loser(sf[1], 0, 0),
+      state: 'pending',
+      fallbackHome: 0,
+      fallbackAway: 0,
+    }]
+    thirdPlace[0].state = matchState(thirdPlace[0])
+    thirdPlace[0].picked = winner(thirdPlace[0], 0, 0)
     return [
       ['R32', r32],
       ['R16', r16],
       ['QF', qf],
       ['SF', sf],
       ['Final', final],
+      ['3rd Place', thirdPlace],
     ]
   }, [playableQualifierBySeed, bracketScores])
 
@@ -319,9 +352,11 @@ function App() {
   }
 
   const activeScore = scoreForContext(matchContext)
-  const hasWinner = activeScore.homeScore !== activeScore.awayScore
-  const hasExactScorePreview = activeScore.homeScore === 2 && activeScore.awayScore === 1
-  const projectedPoints = (hasWinner ? 100 : 0) + (hasExactScorePreview ? 40 : 0) + (hasWinner ? 20 : 0)
+  const isKnockoutTie = matchContext.type === 'bracket' && activeScore.homeScore === activeScore.awayScore
+  const pickComplete = matchContext.type === 'group'
+    ? activeScore.touched
+    : activeScore.homeScore !== activeScore.awayScore || Boolean(activeScore.advancerTeam)
+  const projectedPoints = pickComplete ? 160 : 0
 
   function openMatch(context) {
     setMatchContext(context)
@@ -350,7 +385,7 @@ function App() {
           stage: round,
           home: match.a.team,
           away: match.b.team,
-          venue: round === 'Final' ? 'New York New Jersey Stadium' : 'Mercedes-Benz Stadium',
+          venue: round === 'Final' ? 'New York New Jersey Stadium' : round === '3rd Place' ? 'Hard Rock Stadium' : 'Mercedes-Benz Stadium',
           date: 'Sat, Jul 4 - 9:00 PM',
           events: liveEvents,
           backView: 'bracket',
@@ -366,11 +401,15 @@ function App() {
 
   function updateScore(team, delta) {
     const key = team === matchContext.home ? 'homeScore' : 'awayScore'
-      const updater = (currentScore) => ({
-      ...currentScore,
-      [key]: Math.max(0, currentScore[key] + delta),
-      touched: true,
-    })
+    const updater = (currentScore) => {
+      const nextScore = {
+        ...currentScore,
+        [key]: Math.max(0, currentScore[key] + delta),
+        touched: true,
+      }
+      if (nextScore.homeScore !== nextScore.awayScore) delete nextScore.advancerTeam
+      return nextScore
+    }
     if (matchContext.type === 'group') {
       setGroupScores((current) => ({ ...current, [matchContext.id]: updater(current[matchContext.id]) }))
     } else {
@@ -382,6 +421,46 @@ function App() {
           homeScore: matchContext.fallbackHome ?? 2,
           awayScore: matchContext.fallbackAway ?? 1,
         }),
+      }))
+    }
+  }
+
+  function pickAdvancer(team) {
+    if (matchContext.type !== 'bracket') return
+    setBracketScores((current) => ({
+      ...current,
+      [matchContext.id]: {
+        ...current[matchContext.id],
+        home: matchContext.home,
+        away: matchContext.away,
+        homeScore: activeScore.homeScore,
+        awayScore: activeScore.awayScore,
+        touched: true,
+        advancerTeam: team,
+      },
+    }))
+  }
+
+  function markCurrentScoreTouched() {
+    if (matchContext.type === 'group') {
+      setGroupScores((current) => ({
+        ...current,
+        [matchContext.id]: {
+          ...current[matchContext.id],
+          touched: true,
+        },
+      }))
+    } else {
+      setBracketScores((current) => ({
+        ...current,
+        [matchContext.id]: {
+          ...current[matchContext.id],
+          home: matchContext.home,
+          away: matchContext.away,
+          homeScore: activeScore.homeScore,
+          awayScore: activeScore.awayScore,
+          touched: true,
+        },
       }))
     }
   }
@@ -403,6 +482,7 @@ function App() {
   }
 
   function saveCurrentPrediction(locked = false) {
+    markCurrentScoreTouched()
     betaStore.savePrediction({
       profile,
       context: matchContext,
@@ -457,12 +537,14 @@ function App() {
           </div>
         </header>
 
-        <div className="status-strip">
-          <div><strong>48</strong><span>teams loaded</span></div>
-          <div><strong>{groupMatchups.length}</strong><span>group matches</span></div>
-          <div><strong>{runtimeMode === 'local-beta' ? 'Local' : 'Live'}</strong><span>persistence mode</span></div>
-          <div><strong>{projectedPoints}</strong><span>active pick points</span></div>
-        </div>
+        {view !== 'match' && (
+          <div className="status-strip">
+            <div><strong>48</strong><span>teams loaded</span></div>
+            <div><strong>{groupMatchups.length}</strong><span>group matches</span></div>
+            <div><strong>{runtimeMode === 'local-beta' ? 'Local' : 'Live'}</strong><span>persistence mode</span></div>
+            <div><strong>{projectedPoints}</strong><span>active pick points</span></div>
+          </div>
+        )}
 
         {view === 'groups' && (
           <GroupsView standings={standings} openMatch={openMatch} groupScores={groupScores} />
@@ -494,7 +576,7 @@ function App() {
                           stage: round,
                           home: match.a?.team ?? 'TBD',
                           away: match.b?.team ?? 'TBD',
-                          venue: round === 'Final' ? 'New York New Jersey Stadium' : 'Mercedes-Benz Stadium',
+                          venue: round === 'Final' ? 'New York New Jersey Stadium' : round === '3rd Place' ? 'Hard Rock Stadium' : 'Mercedes-Benz Stadium',
                           date: 'Sat, Jul 4 - 9:00 PM',
                           events: liveEvents,
                           backView: 'bracket',
@@ -525,6 +607,9 @@ function App() {
               onPreviousMatch={() => goToAdjacentMatch(-1)}
               onNextMatch={() => goToAdjacentMatch(1)}
               onSavePrediction={() => saveCurrentPrediction(false)}
+              onPickAdvancer={pickAdvancer}
+              pickComplete={pickComplete}
+              isKnockoutTie={isKnockoutTie}
             />
             <MvpMatchRail context={matchContext} score={activeScore} />
           </section>
@@ -567,6 +652,8 @@ function App() {
 }
 
 function bracketSlotRow(roundIndex, matchIndex) {
+  if (roundIndex === 4) return 19
+  if (roundIndex === 5) return 25
   const spacing = 2 ** roundIndex
   const offset = Math.max(1, spacing)
   return 3 + (matchIndex * spacing * 2) + offset
@@ -644,7 +731,7 @@ function MatchTeam({ slot, score, picked }) {
   )
 }
 
-function MatchPanel({ score, updateScore, projectedPoints, context, onBack, onPreviousMatch, onNextMatch, onSavePrediction, compact = false }) {
+function MatchPanel({ score, updateScore, projectedPoints, context, onBack, onPreviousMatch, onNextMatch, onSavePrediction, onPickAdvancer, pickComplete, isKnockoutTie, compact = false }) {
   return (
     <aside className={`panel match-detail ${compact ? 'compact' : ''}`}>
       <div className="match-meta">
@@ -674,18 +761,33 @@ function MatchPanel({ score, updateScore, projectedPoints, context, onBack, onPr
           </div>
         ))}
       </div>
+      {isKnockoutTie && (
+        <div className="advancer-picker">
+          <div>
+            <strong>Who advances?</strong>
+            <span>Score can stay tied; choose the team that wins after extra time or penalties.</span>
+          </div>
+          <div>
+            {[context.home, context.away].map((team) => (
+              <button className={score.advancerTeam === team ? 'selected' : ''} key={team} onClick={() => onPickAdvancer(team)}>
+                <TeamBadge team={team} />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="points-banner">
         <Sparkles size={16} />
         Projected lock value: {projectedPoints} pts
       </div>
-      <button className="save-pick" onClick={onSavePrediction}>
+      <button className="save-pick" onClick={onSavePrediction} disabled={context.type === 'bracket' && !pickComplete}>
         <Save size={16} />
-        Save prediction
+        {context.type === 'bracket' && !pickComplete ? 'Pick advancer first' : 'Save prediction'}
       </button>
       <div className="points-stack">
-        <ScoreLine label="Winner picked" value={score.homeScore === score.awayScore ? 'pending' : '+100'} state={score.homeScore === score.awayScore ? 'pending' : 'correct'} />
-        <ScoreLine label="Exact score" value={score.homeScore === 2 && score.awayScore === 1 ? '+40' : 'pending'} state={score.homeScore === 2 && score.awayScore === 1 ? 'partial' : 'pending'} />
-        <ScoreLine label="Goal difference" value={score.homeScore === score.awayScore ? 'pending' : '+20'} state={score.homeScore === score.awayScore ? 'pending' : 'partial'} />
+        <ScoreLine label={context.type === 'bracket' ? 'Advancer picked' : 'Result picked'} value={pickComplete ? '+100' : 'pending'} state={pickComplete ? 'correct' : 'pending'} />
+        <ScoreLine label="Exact score" value={pickComplete ? '+40' : 'pending'} state={pickComplete ? 'partial' : 'pending'} />
+        <ScoreLine label="Goal difference" value={pickComplete ? '+20' : 'pending'} state={pickComplete ? 'partial' : 'pending'} />
         <ScoreLine label="Result settlement" value="API sync" state="pending" />
       </div>
       <div className="event-list">
@@ -704,7 +806,9 @@ function MatchPanel({ score, updateScore, projectedPoints, context, onBack, onPr
 
 function MvpMatchRail({ context, score }) {
   const winner = score.homeScore === score.awayScore
-    ? 'No winner selected yet'
+    ? context.type === 'bracket'
+      ? score.advancerTeam ? `${score.advancerTeam} advances after ET/pens` : 'Pick who advances after ET/pens'
+      : score.touched ? 'Draw selected' : 'No result selected yet'
     : score.homeScore > score.awayScore
       ? context.home
       : context.away

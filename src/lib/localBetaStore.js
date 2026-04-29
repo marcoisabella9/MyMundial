@@ -53,7 +53,8 @@ function predictionKey(userId, contextId) {
 }
 
 function summarizePrediction(prediction) {
-  return `${prediction.homeTeam} ${prediction.predictedHomeScore}-${prediction.predictedAwayScore} ${prediction.awayTeam}`
+  const score = `${prediction.homeTeam} ${prediction.predictedHomeScore}-${prediction.predictedAwayScore} ${prediction.awayTeam}`
+  return prediction.advancingTeam ? `${score}, ${prediction.advancingTeam} advances` : score
 }
 
 export const betaStore = {
@@ -153,6 +154,8 @@ export const betaStore = {
       awayTeam: context.away,
       predictedHomeScore: score.homeScore,
       predictedAwayScore: score.awayScore,
+      advancingTeam: score.advancerTeam
+        ?? (score.homeScore > score.awayScore ? context.home : score.homeScore < score.awayScore ? context.away : null),
       lockedAt: locked ? now : null,
       updatedAt: now,
       resultState: locked ? 'locked' : 'draft',

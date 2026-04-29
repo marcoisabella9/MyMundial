@@ -450,7 +450,7 @@ h3 {
 
 .bracket-scroll {
   display: grid;
-  grid-template-columns: 252px 252px 252px 252px 252px;
+  grid-template-columns: 252px 252px 252px 252px 252px 252px;
   gap: 54px;
   overflow-x: auto;
   padding: 4px 36px 14px 0;
@@ -480,6 +480,12 @@ h3 {
   border-color: #0f8f4f;
   background: linear-gradient(180deg, #ffffff, #f0fbf4);
   box-shadow: 0 14px 34px rgba(15, 143, 79, 0.14);
+}
+
+.round-5 .match-card {
+  min-height: 112px;
+  border-color: #d8c36f;
+  background: linear-gradient(180deg, #ffffff, #fffbea);
 }
 
 .match-card {
@@ -512,7 +518,8 @@ h3 {
   border-top: 2px solid #cfe0d7;
 }
 
-.bracket-path .round-4 .match-card::after {
+.bracket-path .round-4 .match-card::after,
+.bracket-path .round-5 .match-card::after {
   display: none;
 }
 
@@ -528,6 +535,12 @@ h3 {
 .match-card.live {
   border-color: #0f8f4f;
   box-shadow: 0 0 0 3px rgba(15, 143, 79, 0.11);
+}
+
+.match-card.needs.winner,
+.match-card.needs-winner {
+  border-color: #d8c36f;
+  background: #fffdf3;
 }
 
 .match-team {
@@ -671,6 +684,46 @@ h3 {
   font-weight: 850;
 }
 
+.advancer-picker {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #d8c36f;
+  border-radius: 8px;
+  background: #fffdf3;
+  padding: 12px;
+}
+
+.advancer-picker > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.advancer-picker span {
+  color: #647067;
+  font-size: 13px;
+}
+
+.advancer-picker > div:last-child {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.advancer-picker button {
+  justify-content: center;
+  min-height: 42px;
+  border: 1px solid #e3ebe6;
+  border-radius: 8px;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.advancer-picker button.selected {
+  border-color: #0f8f4f;
+  background: #eef9f2;
+  box-shadow: 0 0 0 3px rgba(15, 143, 79, 0.1);
+}
+
 .save-pick {
   display: inline-flex;
   align-items: center;
@@ -683,6 +736,11 @@ h3 {
   color: #0f8f4f;
   cursor: pointer;
   font-weight: 850;
+}
+
+.save-pick:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
 }
 
 .points-stack {
@@ -1376,7 +1434,7 @@ h3 {
   }
 
   .bracket-scroll {
-    grid-template-columns: repeat(5, 220px);
+    grid-template-columns: repeat(6, 220px);
     gap: 28px;
     min-height: 1584px;
   }
