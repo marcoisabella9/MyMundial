@@ -987,31 +987,97 @@ h3 {
   color: #647067;
 }
 
-.recipient-grid {
+.award-search-row {
   display: grid;
-  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  grid-template-columns: minmax(260px, 1fr) minmax(180px, 0.45fr);
+  gap: 10px;
+  align-items: end;
+}
+
+.award-search {
+  display: grid;
+  gap: 7px;
+}
+
+.award-search span,
+.award-picked span {
+  color: #647067;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.award-search input {
+  width: 100%;
+  height: 44px;
+  border: 1px solid #dce6df;
+  border-radius: 8px;
+  background: #fff;
+  color: #17211b;
+  font: inherit;
+  padding: 0 12px;
+}
+
+.award-search input:focus {
+  border-color: #0f8f4f;
+  box-shadow: 0 0 0 3px rgba(15, 143, 79, 0.1);
+  outline: none;
+}
+
+.award-picked {
+  display: grid;
+  gap: 6px;
+  min-height: 44px;
+  border: 1px solid #dce6df;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 9px 12px;
+}
+
+.award-picked strong {
+  overflow: hidden;
+  color: #17211b;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.award-helper {
+  margin: -4px 0 0;
+  color: #647067;
+}
+
+.recipient-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
   gap: 10px;
 }
 
-.recipient-grid button {
-  min-height: 42px;
+.recipient-list button {
+  display: grid;
+  gap: 5px;
+  min-height: 70px;
   border: 1px solid #e1eae4;
   border-radius: 8px;
   background: #ffffff;
   color: #17211b;
   cursor: pointer;
   text-align: left;
-  padding: 0 12px;
+  padding: 11px 12px;
 }
 
-.recipient-grid button.selected {
+.recipient-list button.selected {
   border-color: #0f8f4f;
   background: #eef9f2;
   color: #0f8f4f;
   font-weight: 850;
 }
 
-.recipient-grid button:disabled {
+.recipient-list button.custom-recipient {
+  border-color: #b7d9c3;
+  background: #f4fbf7;
+}
+
+.recipient-list button:disabled {
   cursor: not-allowed;
   opacity: 0.6;
 }
@@ -1644,7 +1710,7 @@ h3 {
   .mvp-grid,
   .award-grid,
   .api-map,
-  .recipient-grid {
+  .recipient-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -1722,7 +1788,8 @@ h3 {
   .mvp-grid,
   .award-grid,
   .api-map,
-  .recipient-grid {
+  .recipient-list,
+  .award-search-row {
     grid-template-columns: 1fr;
   }
 

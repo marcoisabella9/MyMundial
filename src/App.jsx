@@ -18,7 +18,7 @@ import {
   X,
 } from 'lucide-react'
 import './App.css'
-import { awards, friends, groupMatchEvents, groups, liveEvents, teamMeta } from './data'
+import { awardCandidateCatalog, awards, friends, groupMatchEvents, groups, liveEvents, teamMeta } from './data'
 import { hasSupabaseConfig, runtimeMode } from './lib/config'
 import { betaStore } from './lib/localBetaStore'
 import { supabase } from './lib/supabaseClient'
@@ -79,11 +79,28 @@ const initialGroupScores = Object.fromEntries(
   ]),
 )
 
-const awardRecipients = {
-  potm: ['Kylian Mbappe', 'Lionel Messi', 'Jude Bellingham', 'Vinicius Junior', 'Lamine Yamal', 'Harry Kane', 'Jamal Musiala', 'Phil Foden'],
-  boot: ['Kylian Mbappe', 'Harry Kane', 'Erling Haaland', 'Lautaro Martinez', 'Cristiano Ronaldo', 'Vinicius Junior', 'Lamine Yamal', 'Julian Alvarez'],
-  glove: ['Alisson', 'Emiliano Martinez', 'Thibaut Courtois', 'Mike Maignan', 'Manuel Neuer', 'Unai Simon', 'Diogo Costa', 'Yassine Bounou'],
-  young: ['Lamine Yamal', 'Endrick', 'Kendry Paez', 'Jude Bellingham', 'Pau Cubarsi', 'Gavi', 'Arda Guler', 'Benjamin Sesko'],
+const awardSearchMeta = {
+  potm: {
+    placeholder: 'Search any player or type a custom name',
+    helper: 'Broad player pool. Custom names are allowed for V1 settlement.',
+    customLabel: 'Use player name',
+  },
+  boot: {
+    placeholder: 'Search goal scorers or type a custom name',
+    helper: 'Forwards and attacking mids are surfaced first, but any player can be saved.',
+    customLabel: 'Use scorer name',
+  },
+  glove: {
+    placeholder: 'Search goalkeepers only',
+    helper: 'Golden Glove is restricted to goalkeeper candidates. Missing keepers can be typed and reviewed at settlement.',
+    customLabel: 'Use goalkeeper name',
+    position: 'GK',
+  },
+  young: {
+    placeholder: 'Search young players or type a custom name',
+    helper: 'Young-player candidates are surfaced first. Custom names are allowed for V1 settlement.',
+    customLabel: 'Use young player name',
+  },
 }
 
 function hydrateScoresFromPredictions(predictions) {
@@ -1366,8 +1383,41 @@ function LeagueManager({ league, leagueName, setLeagueName, inviteCode, setInvit
 }
 
 function AwardsView({ selectedAward, setSelectedAward, awardPicks, onSaveAwardPick, awardSaveStatus, isSignedIn }) {
+  const [awardQuery, setAwardQuery] = useState('')
   const activeAward = awards.find((award) => award.id === selectedAward) ?? awards[0]
-  const activeRecipients = awardRecipients[activeAward.id] ?? []
+  const searchMeta = awardSearchMeta[activeAward.id] ?? awardSearchMeta.potm
+  const cleanQuery = awardQuery.trim()
+  const normalizedQuery = cleanQuery.toLowerCase()
+  const activeCandidates = useMemo(() => {
+    const eligible = awardCandidateCatalog.filter((candidate) => {
+      const awardEligible = candidate.tags.includes(activeAward.id)
+      const positionEligible = !searchMeta.position || candidate.position === searchMeta.position
+      return awardEligible && positionEligible
+    })
+    const filtered = normalizedQuery
+      ? eligible.filter((candidate) => (
+        candidate.name.toLowerCase().includes(normalizedQuery)
+        || candidate.team.toLowerCase().includes(normalizedQuery)
+        || candidate.position.toLowerCase().includes(normalizedQuery)
+      ))
+      : eligible
+    return filtered.slice(0, 18)
+  }, [activeAward.id, normalizedQuery, searchMeta.position])
+  const exactEligibleCandidate = activeCandidates.find((candidate) => candidate.name.toLowerCase() === normalizedQuery)
+  const knownButBlocked = Boolean(searchMeta.position && cleanQuery && awardCandidateCatalog.some((candidate) => (
+    candidate.position !== searchMeta.position
+    && (
+      candidate.name.toLowerCase().includes(normalizedQuery)
+      || normalizedQuery.includes(candidate.name.toLowerCase())
+    )
+  )))
+  const canUseCustom = Boolean(cleanQuery && !exactEligibleCandidate && !knownButBlocked)
+
+  function chooseAwardRecipient(recipient) {
+    onSaveAwardPick(activeAward, recipient)
+    setAwardQuery('')
+  }
+
   return (
     <section className="page-grid">
       <div className="panel wide">
@@ -1394,18 +1444,54 @@ function AwardsView({ selectedAward, setSelectedAward, awardPicks, onSaveAwardPi
             <h3>{activeAward.label}</h3>
             <span>{activeAward.points} points if correct</span>
           </div>
-          <div className="recipient-grid">
-            {activeRecipients.map((recipient) => (
+          <div className="award-search-row">
+            <label className="award-search">
+              <span>Search</span>
+              <input
+                value={awardQuery}
+                onChange={(event) => setAwardQuery(event.target.value)}
+                placeholder={searchMeta.placeholder}
+              />
+            </label>
+            <div className="award-picked">
+              <span>Current pick</span>
+              <strong>{awardPicks[activeAward.id]?.recipient ?? 'No pick yet'}</strong>
+            </div>
+          </div>
+          <p className="award-helper">{searchMeta.helper}</p>
+          <div className="recipient-list">
+            {activeCandidates.map((candidate) => (
               <button
-                key={recipient}
-                className={awardPicks[activeAward.id]?.recipient === recipient ? 'selected' : ''}
-                onClick={() => onSaveAwardPick(activeAward, recipient)}
+                key={`${candidate.name}-${candidate.team}`}
+                className={awardPicks[activeAward.id]?.recipient === candidate.name ? 'selected' : ''}
+                onClick={() => chooseAwardRecipient(candidate.name)}
                 disabled={awardSaveStatus.loading}
               >
-                {recipient}
+                <strong>{candidate.name}</strong>
+                <span>{candidate.team} - {candidate.position}</span>
               </button>
             ))}
+            {canUseCustom && (
+              <button
+                className="custom-recipient"
+                onClick={() => chooseAwardRecipient(cleanQuery)}
+                disabled={awardSaveStatus.loading}
+              >
+                <strong>{searchMeta.customLabel}</strong>
+                <span>{cleanQuery}</span>
+              </button>
+            )}
           </div>
+          {knownButBlocked && (
+            <p className="save-message error">
+              {activeAward.label === 'Golden Glove'
+                ? 'That saved candidate is not listed as a goalkeeper.'
+                : 'That candidate is not eligible for this award list.'}
+            </p>
+          )}
+          {!activeCandidates.length && !canUseCustom && !knownButBlocked && (
+            <p className="empty-state">No matching candidates yet.</p>
+          )}
           {(awardSaveStatus.message || awardSaveStatus.error) && (
             <p className={`save-message ${awardSaveStatus.error ? 'error' : ''}`}>
               {awardSaveStatus.error || awardSaveStatus.message}
