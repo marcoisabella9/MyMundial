@@ -5,8 +5,8 @@ function profileFromUser(user, fallbackProfile = {}) {
   return {
     id: user?.id ?? fallbackProfile.id,
     displayName:
-      fallbackProfile.displayName
-      ?? user?.user_metadata?.display_name
+      user?.user_metadata?.display_name
+      ?? fallbackProfile.displayName
       ?? email.split('@')[0]
       ?? 'MyMundial user',
     email,
@@ -81,17 +81,46 @@ function awardPickFromRow(row) {
   }
 }
 
-function leagueFromRows(league, members = [], activity = []) {
+function leagueFromRows(league, members = [], activity = [], predictions = [], awardPicks = []) {
   if (!league) return null
+  const predictionStats = predictions.reduce((stats, prediction) => {
+    const current = stats[prediction.user_id] ?? { predictionCount: 0, lastSavedAt: null }
+    stats[prediction.user_id] = {
+      predictionCount: current.predictionCount + 1,
+      lastSavedAt: [current.lastSavedAt, prediction.updated_at].filter(Boolean).sort().at(-1) ?? null,
+    }
+    return stats
+  }, {})
+  const awardStats = awardPicks.reduce((stats, awardPick) => {
+    const current = stats[awardPick.user_id] ?? { awardCount: 0, lastSavedAt: null }
+    stats[awardPick.user_id] = {
+      awardCount: current.awardCount + 1,
+      lastSavedAt: [current.lastSavedAt, awardPick.updated_at].filter(Boolean).sort().at(-1) ?? null,
+    }
+    return stats
+  }, {})
   return {
     id: league.id,
     name: league.name,
     inviteCode: league.invite_code,
+    createdAt: league.created_at,
     members: members.map((member) => ({
       id: member.user_id,
       displayName: member.profiles?.display_name ?? 'Member',
       role: member.role,
       points: 0,
+      predictionCount: predictionStats[member.user_id]?.predictionCount ?? 0,
+      awardCount: awardStats[member.user_id]?.awardCount ?? 0,
+      predictions: predictions
+        .filter((prediction) => prediction.user_id === member.user_id)
+        .map(predictionFromRow),
+      awardPicks: awardPicks
+        .filter((awardPick) => awardPick.user_id === member.user_id)
+        .map(awardPickFromRow),
+      lastSavedAt: [
+        predictionStats[member.user_id]?.lastSavedAt,
+        awardStats[member.user_id]?.lastSavedAt,
+      ].filter(Boolean).sort().at(-1) ?? null,
     })),
     activity: activity.map((item) => ({
       id: item.id,
@@ -108,6 +137,7 @@ function activityText(item) {
   if (item.activity_type === 'prediction_saved') {
     return `${actor} saved ${item.metadata?.summary ?? 'a prediction'}.`
   }
+  if (item.activity_type === 'league_updated') return `${actor} updated the league.`
   return `${actor} updated the league.`
 }
 
@@ -145,13 +175,32 @@ export const supabaseMvpStore = {
   async ensureProfile(user, fallbackProfile) {
     const client = await requireClient()
     const fallback = profileFromUser(user, fallbackProfile)
-    const { data, error } = await client
+    const { data: existing, error: existingError } = await client
       .from('profiles')
-      .upsert({
+      .select('*')
+      .eq('id', user.id)
+      .maybeSingle()
+    if (existingError) throw existingError
+    const metadataName = user?.user_metadata?.display_name?.trim()
+    if (existing) {
+      const shouldRepairLegacyName = metadataName && ['Alex', 'Guest'].includes(existing.display_name) && existing.display_name !== metadataName
+      if (!shouldRepairLegacyName) return rowToProfile(existing, user, fallback)
+      const { data: repaired, error: repairError } = await client
+        .from('profiles')
+        .update({ display_name: metadataName })
+        .eq('id', user.id)
+        .select()
+        .single()
+      if (repairError) throw repairError
+      return rowToProfile(repaired, user, fallback)
+    }
+
+    const { data, error } = await client
+      .from('profiles').insert({
         id: user.id,
         display_name: fallback.displayName,
         email: fallback.email,
-      }, { onConflict: 'id' })
+      })
       .select()
       .single()
     if (error) throw error
@@ -186,7 +235,7 @@ export const supabaseMvpStore = {
       .from('league_members')
       .select('league_id')
       .eq('user_id', user.id)
-      .order('joined_at', { ascending: true })
+      .order('joined_at', { ascending: false })
       .limit(1)
       .maybeSingle()
     if (membershipError) throw membershipError
@@ -214,7 +263,26 @@ export const supabaseMvpStore = {
       .limit(8)
     if (activityError) throw activityError
 
-    return leagueFromRows(league, members, activity)
+    const memberIds = members.map((member) => member.user_id)
+    let predictions = []
+    let awardPicks = []
+    if (memberIds.length) {
+      const { data: predictionRows, error: predictionError } = await client
+        .from('mvp_prediction_drafts')
+        .select('*')
+        .in('user_id', memberIds)
+        .order('updated_at', { ascending: false })
+      if (!predictionError) predictions = predictionRows
+
+      const { data: awardRows, error: awardError } = await client
+        .from('mvp_award_picks')
+        .select('*')
+        .in('user_id', memberIds)
+        .order('updated_at', { ascending: false })
+      if (!awardError) awardPicks = awardRows
+    }
+
+    return leagueFromRows(league, members, activity, predictions, awardPicks)
   },
 
   async createLeague(name, profile, user) {
@@ -243,6 +311,26 @@ export const supabaseMvpStore = {
       actor_id: user.id,
       activity_type: 'created',
       metadata: { name: league.name, display_name: profile.displayName },
+    })
+
+    return this.loadLeague(user)
+  },
+
+  async updateLeagueName(league, name, user) {
+    const client = await requireClient()
+    const nextName = name?.trim()
+    if (!nextName) throw new Error('Enter a league name.')
+    const { error } = await client
+      .from('leagues')
+      .update({ name: nextName })
+      .eq('id', league.id)
+    if (error) throw error
+
+    await client.from('league_activity').insert({
+      league_id: league.id,
+      actor_id: user.id,
+      activity_type: 'league_updated',
+      metadata: { name: nextName },
     })
 
     return this.loadLeague(user)

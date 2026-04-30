@@ -7,6 +7,8 @@ import {
   CircleHelp,
   CircleMinus,
   CirclePlus,
+  Copy,
+  Eye,
   Info,
   Medal,
   Radio,
@@ -18,7 +20,7 @@ import {
   X,
 } from 'lucide-react'
 import './App.css'
-import { awardCandidateCatalog, awards, friends, groupMatchEvents, groups, liveEvents, teamMeta } from './data'
+import { awardCandidateCatalog, awards, groupMatchEvents, groups, liveEvents, teamMeta } from './data'
 import { hasSupabaseConfig, runtimeMode } from './lib/config'
 import { betaStore } from './lib/localBetaStore'
 import { supabase } from './lib/supabaseClient'
@@ -31,6 +33,16 @@ const navItems = [
   { id: 'leagues', label: 'Leagues', icon: Users },
   { id: 'awards', label: 'Awards', icon: Medal },
 ]
+
+function initialView() {
+  if (typeof window === 'undefined') return 'groups'
+  return new URLSearchParams(window.location.search).get('invite') ? 'leagues' : 'groups'
+}
+
+function initialInviteCode() {
+  if (typeof window === 'undefined') return ''
+  return new URLSearchParams(window.location.search).get('invite') ?? ''
+}
 
 function scrollToTop() {
   requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: 'instant' }))
@@ -134,6 +146,33 @@ function latestPredictionTime(predictions) {
   return latest ?? null
 }
 
+function leagueInviteUrl(inviteCode) {
+  if (!inviteCode || inviteCode === 'SIGNIN') return ''
+  const baseUrl = typeof window === 'undefined' ? 'https://mymundial.vercel.app/' : window.location.origin + window.location.pathname
+  return `${baseUrl}?invite=${encodeURIComponent(inviteCode)}`
+}
+
+function memberCompletion(member) {
+  const savedPicks = (member.predictionCount ?? 0) + (member.awardCount ?? 0)
+  const targetPicks = groupMatchups.length + 32 + awards.length
+  return {
+    savedPicks,
+    targetPicks,
+    points: member.points ?? 0,
+    percent: Math.min(100, Math.round((savedPicks / targetPicks) * 100)),
+  }
+}
+
+function emptyLeague() {
+  return {
+    id: 'no-league',
+    name: 'Create or join a private league',
+    inviteCode: '',
+    members: [],
+    activity: [],
+  }
+}
+
 const defaultMatchContext = {
   id: 'A-1',
   type: 'group',
@@ -222,7 +261,7 @@ function buildStandings(groupScores) {
 }
 
 function App() {
-  const [view, setView] = useState('groups')
+  const [view, setView] = useState(initialView)
   const [session, setSession] = useState(null)
   const [authMode, setAuthMode] = useState('sign-in')
   const [authForm, setAuthForm] = useState({ displayName: '', email: '', password: '' })
@@ -230,11 +269,14 @@ function App() {
   const [saveStatus, setSaveStatus] = useState({ loading: false, message: '', error: '' })
   const [bulkSaveStatus, setBulkSaveStatus] = useState({ loading: false, message: '', error: '' })
   const [awardSaveStatus, setAwardSaveStatus] = useState({ loading: false, message: '', error: '' })
+  const [leagueStatus, setLeagueStatus] = useState({ loading: false, message: '', error: '' })
+  const [shareStatus, setShareStatus] = useState('')
+  const [selectedLeagueMemberId, setSelectedLeagueMemberId] = useState(null)
   const [profile, setProfile] = useState(() => betaStore.loadProfile())
   const [profileDraft, setProfileDraft] = useState(() => betaStore.loadProfile())
   const [league, setLeague] = useState(() => betaStore.loadLeague())
   const [leagueName, setLeagueName] = useState(() => betaStore.loadLeague().name)
-  const [inviteCode, setInviteCode] = useState('')
+  const [inviteCode, setInviteCode] = useState(initialInviteCode)
   const [predictionCount, setPredictionCount] = useState(() => betaStore.countPredictions())
   const [lastSavedAt, setLastSavedAt] = useState(() => betaStore.lastSavedAt())
   const [groupScores, setGroupScores] = useState(() => betaStore.loadGroupScores(initialGroupScores))
@@ -291,6 +333,9 @@ function App() {
         if (remoteLeague) {
           setLeague(remoteLeague)
           setLeagueName(remoteLeague.name)
+        } else {
+          setLeague(emptyLeague())
+          setLeagueName('MyMundial private league')
         }
         if (remotePredictions.length > 0) {
           const hydrated = hydrateScoresFromPredictions(remotePredictions)
@@ -507,6 +552,16 @@ function App() {
   ), [bracketRounds])
 
   const matchSequence = useMemo(() => [...groupMatchContexts, ...knockoutMatchContexts], [groupMatchContexts, knockoutMatchContexts])
+  const leagueRows = useMemo(() => league.members
+    .map((member) => {
+      const completion = memberCompletion(member)
+      return {
+        ...member,
+        ...completion,
+      }
+    })
+    .sort((a, b) => b.points - a.points || b.percent - a.percent || b.savedPicks - a.savedPicks || a.displayName.localeCompare(b.displayName)), [league.members])
+  const selectedLeagueMember = leagueRows.find((member) => member.id === selectedLeagueMemberId) ?? null
 
   function scoreForContext(context) {
     if (context.type === 'group') return groupScores[context.id]
@@ -641,7 +696,7 @@ function App() {
       setAwardPicks(betaStore.loadAwardPicks())
       setPredictionCount(betaStore.countPredictions())
       setLastSavedAt(betaStore.lastSavedAt())
-      setAuthStatus({ loading: false, message: 'Signed out. Local beta mode is active.', error: '' })
+      setAuthStatus({ loading: false, message: 'Signed out. Guest mode is active.', error: '' })
     } catch (error) {
       setAuthStatus({ loading: false, message: '', error: error.message })
     }
@@ -651,8 +706,13 @@ function App() {
     try {
       if (isSignedIn) {
         const nextProfile = await supabaseMvpStore.saveProfile(currentUser, profileDraft)
+        const remoteLeague = await supabaseMvpStore.loadLeague(currentUser)
         setProfile(nextProfile)
         setProfileDraft(nextProfile)
+        if (remoteLeague) {
+          setLeague(remoteLeague)
+          setLeagueName(remoteLeague.name)
+        }
         setAuthStatus({ loading: false, message: 'Profile saved to Supabase.', error: '' })
         return
       }
@@ -666,34 +726,72 @@ function App() {
   }
 
   async function createLeague() {
+    if (!isSignedIn) {
+      setLeagueStatus({ loading: false, message: '', error: 'Sign in before creating a private league.' })
+      setView('leagues')
+      return
+    }
+    setLeagueStatus({ loading: true, message: 'Creating private league...', error: '' })
     try {
-      if (isSignedIn) {
-        const remoteLeague = await supabaseMvpStore.createLeague(leagueName, profile, currentUser)
-        setLeague(remoteLeague)
-        setLeagueName(remoteLeague.name)
-        setAuthStatus({ loading: false, message: 'Private league created in Supabase.', error: '' })
-        return
-      }
-      setLeague(betaStore.createLeague(leagueName, profile))
+      const remoteLeague = await supabaseMvpStore.createLeague(leagueName, profile, currentUser)
+      setLeague(remoteLeague)
+      setLeagueName(remoteLeague.name)
+      setLeagueStatus({ loading: false, message: 'Private league created. Share the invite code with friends.', error: '' })
     } catch (error) {
-      setAuthStatus({ loading: false, message: '', error: error.message })
+      setLeagueStatus({ loading: false, message: '', error: error.message })
+    }
+  }
+
+  async function updateLeagueName() {
+    if (!isSignedIn) {
+      setLeagueStatus({ loading: false, message: '', error: 'Sign in before editing a private league.' })
+      return
+    }
+    setLeagueStatus({ loading: true, message: 'Updating league...', error: '' })
+    try {
+      const remoteLeague = await supabaseMvpStore.updateLeagueName(league, leagueName, currentUser)
+      setLeague(remoteLeague)
+      setLeagueName(remoteLeague.name)
+      setLeagueStatus({ loading: false, message: 'League name updated.', error: '' })
+    } catch (error) {
+      setLeagueStatus({ loading: false, message: '', error: error.message })
     }
   }
 
   async function joinLeague() {
+    if (!isSignedIn) {
+      setLeagueStatus({ loading: false, message: '', error: 'Create an account or sign in before joining a league.' })
+      setView('leagues')
+      return
+    }
+    const codeToJoin = (inviteCode || league.inviteCode).trim()
+    if (!codeToJoin || codeToJoin === 'SIGNIN') {
+      setLeagueStatus({ loading: false, message: '', error: 'Enter an invite code.' })
+      return
+    }
+    setLeagueStatus({ loading: true, message: `Joining ${codeToJoin.toUpperCase()}...`, error: '' })
     try {
-      if (isSignedIn) {
-        const remoteLeague = await supabaseMvpStore.joinLeague(inviteCode || league.inviteCode, currentUser)
-        setLeague(remoteLeague)
-        setLeagueName(remoteLeague.name)
-        setAuthStatus({ loading: false, message: `Joined ${remoteLeague.name}.`, error: '' })
-        setInviteCode('')
-        return
-      }
-      setLeague(betaStore.joinLeague(inviteCode, profile))
+      const remoteLeague = await supabaseMvpStore.joinLeague(codeToJoin, currentUser)
+      setLeague(remoteLeague)
+      setLeagueName(remoteLeague.name)
+      setLeagueStatus({ loading: false, message: `Joined ${remoteLeague.name}.`, error: '' })
       setInviteCode('')
     } catch (error) {
-      setAuthStatus({ loading: false, message: '', error: error.message })
+      setLeagueStatus({ loading: false, message: '', error: error.message })
+    }
+  }
+
+  async function copyInviteLink() {
+    const inviteUrl = leagueInviteUrl(league.inviteCode)
+    if (!inviteUrl) {
+      setShareStatus('Create a league first.')
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(inviteUrl)
+      setShareStatus('Invite link copied.')
+    } catch {
+      setShareStatus(inviteUrl)
     }
   }
 
@@ -803,8 +901,10 @@ function App() {
     try {
       if (isSignedIn) {
         const savedAward = await supabaseMvpStore.saveAwardPick({ profile, award, recipient })
+        const remoteLeague = await supabaseMvpStore.loadLeague(currentUser)
         setAwardPicks((current) => ({ ...current, [award.id]: savedAward }))
         setLastSavedAt(savedAward.updatedAt)
+        if (remoteLeague) setLeague(remoteLeague)
         setAwardSaveStatus({ loading: false, message: `${award.label} synced to your account.`, error: '' })
         return
       }
@@ -842,11 +942,11 @@ function App() {
           })}
           <button className="nav-save-all" onClick={saveAllPredictions} disabled={bulkSaveStatus.loading} title="Save all current picks">
             {bulkSaveStatus.loading ? <RefreshSpinner /> : <Save size={18} />}
-            <span>{bulkSaveStatus.loading ? 'Saving...' : 'Save all'}</span>
+            <span>{bulkSaveStatus.loading ? 'Saving...' : 'Save all predictions'}</span>
           </button>
         </nav>
         <div className="side-card">
-          <span>{persistenceMode === 'supabase' ? 'Supabase account' : runtimeMode === 'local-beta' ? 'Local beta mode' : 'Sign in to sync'}</span>
+          <span>{persistenceMode === 'supabase' ? 'Signed in' : runtimeMode === 'local-beta' ? 'Guest mode' : 'Sign in to sync'}</span>
           <strong>{predictionCount}</strong>
           <small>saved predictions</small>
           {(bulkSaveStatus.message || bulkSaveStatus.error) && (
@@ -979,16 +1079,32 @@ function App() {
               />
               <LeagueManager
                 league={league}
+                leagueRows={leagueRows}
                 leagueName={leagueName}
                 setLeagueName={setLeagueName}
                 inviteCode={inviteCode}
                 setInviteCode={setInviteCode}
                 onCreate={createLeague}
+                onUpdateName={updateLeagueName}
                 onJoin={joinLeague}
+                onCopyInvite={copyInviteLink}
+                leagueStatus={leagueStatus}
+                shareStatus={shareStatus}
+                isSignedIn={isSignedIn}
               />
             </div>
-            <Leaderboard title="League standings" subtitle={league.name} rows={friends} />
-            <Leaderboard title="Global leaderboard" subtitle="Overall World Cup rank" rows={[...friends].sort((a, b) => b.total - a.total)} global />
+            <LeagueStandings
+              league={league}
+              rows={leagueRows}
+              onViewPredictions={setSelectedLeagueMemberId}
+            />
+            <LeagueActivity league={league} />
+            {selectedLeagueMember && (
+              <MemberPredictionModal
+                member={selectedLeagueMember}
+                onClose={() => setSelectedLeagueMemberId(null)}
+              />
+            )}
           </section>
         )}
 
@@ -1265,32 +1381,6 @@ function ScoreLine({ label, value, state }) {
   )
 }
 
-function Leaderboard({ title, subtitle, rows, global = false }) {
-  return (
-    <div className="panel leaderboard">
-      <div className="panel-head">
-        <div>
-          <p className="eyebrow">{subtitle}</p>
-          <h2>{title}</h2>
-        </div>
-        <span className="pill">{global ? 'Public' : 'Invite-only'}</span>
-      </div>
-      {rows.map((row, index) => (
-        <div className="leader-row" key={row.name}>
-          <span className="rank">{index + 1}</span>
-          <div>
-            <strong>{row.name}</strong>
-            <small>{row.exact} exact scores - {row.status}</small>
-          </div>
-          <span>{row.round}</span>
-          <span>{row.awards}</span>
-          <strong>{row.total}</strong>
-        </div>
-      ))}
-    </div>
-  )
-}
-
 function AccountPanel({
   profile,
   draft,
@@ -1312,10 +1402,10 @@ function AccountPanel({
     <div className="panel account-panel">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">Account foundation</p>
-          <h2>{isSignedIn ? 'Supabase profile' : 'Sign in to sync'}</h2>
+          <p className="eyebrow">Account</p>
+          <h2>{isSignedIn ? 'Profile' : 'Sign in to play with friends'}</h2>
         </div>
-        <span className="pill"><UserRound size={14} /> {isSignedIn ? profile.displayName : 'Local beta'}</span>
+        <span className="pill"><UserRound size={14} /> {isSignedIn ? profile.displayName : 'Guest'}</span>
       </div>
       {!hasSupabaseConfig && (
         <div className="auth-note">
@@ -1371,7 +1461,7 @@ function AccountPanel({
         <div className="auth-card signed-in-card">
           <div>
             <strong>{profile.email}</strong>
-            <span>Predictions and leagues sync to Supabase.</span>
+            <span>Predictions and private leagues sync to your account.</span>
           </div>
           <button className="secondary" onClick={onSignOut} disabled={authStatus.loading}>Sign out</button>
         </div>
@@ -1401,47 +1491,169 @@ function AccountPanel({
         <span>{predictionCount} saved predictions</span>
         <span>{lastSavedAt ? `Last saved ${new Date(lastSavedAt).toLocaleTimeString()}` : 'No saved pick yet'}</span>
       </div>
-      <button className="full-button" onClick={onSave}><Save size={16} /> {isSignedIn ? 'Save Supabase profile' : 'Save beta profile'}</button>
+      <button className="full-button" onClick={onSave}><Save size={16} /> {isSignedIn ? 'Save profile' : 'Save guest profile'}</button>
     </div>
   )
 }
 
-function LeagueManager({ league, leagueName, setLeagueName, inviteCode, setInviteCode, onCreate, onJoin }) {
+function LeagueManager({
+  league,
+  leagueRows,
+  leagueName,
+  setLeagueName,
+  inviteCode,
+  setInviteCode,
+  onCreate,
+  onUpdateName,
+  onJoin,
+  onCopyInvite,
+  leagueStatus,
+  shareStatus,
+  isSignedIn,
+}) {
+  const inviteUrl = leagueInviteUrl(league.inviteCode)
   return (
     <div className="panel league-manager">
       <div className="panel-head">
         <div>
           <p className="eyebrow">Private leagues</p>
-          <h2>{league.name}</h2>
+          <h2>{isSignedIn ? league.name : 'Create your first league'}</h2>
         </div>
-        <span className="pill">{league.inviteCode}</span>
+        <span className="pill">{isSignedIn ? `${leagueRows.length} member${leagueRows.length === 1 ? '' : 's'}` : 'Account required'}</span>
       </div>
+      {!isSignedIn && (
+        <div className="auth-note">
+          Sign in or create an account first. Private leagues, invite codes, and member standings sync through Supabase.
+        </div>
+      )}
       <div className="form-grid">
         <label>
           League name
-          <input value={leagueName} onChange={(event) => setLeagueName(event.target.value)} />
+          <input value={leagueName} onChange={(event) => setLeagueName(event.target.value)} disabled={!isSignedIn} />
         </label>
         <label>
           Invite code
-          <input value={inviteCode} onChange={(event) => setInviteCode(event.target.value)} placeholder={league.inviteCode} />
+          <input value={inviteCode} onChange={(event) => setInviteCode(event.target.value.toUpperCase())} placeholder={isSignedIn ? league.inviteCode : 'Enter code after signing in'} disabled={!isSignedIn} />
         </label>
       </div>
       <div className="button-row">
-        <button className="full-button" onClick={onCreate}><Sparkles size={16} /> Create league</button>
-        <button className="full-button secondary" onClick={onJoin}><Users size={16} /> Join code</button>
+        <button className="full-button" onClick={onCreate} disabled={!isSignedIn || leagueStatus.loading}><Sparkles size={16} /> Create league</button>
+        <button className="full-button secondary" onClick={onUpdateName} disabled={!isSignedIn || !league.inviteCode || leagueStatus.loading}><Save size={16} /> Rename</button>
+        <button className="full-button secondary" onClick={onJoin} disabled={!isSignedIn || leagueStatus.loading}><Users size={16} /> Join code</button>
+        <button className="full-button secondary" onClick={onCopyInvite} disabled={!isSignedIn || !inviteUrl}><Copy size={16} /> Copy invite</button>
       </div>
-      <div className="member-list">
-        {league.members.map((member) => (
-          <div key={member.id}>
+      {inviteUrl && (
+        <div className="invite-card">
+          <span>Share link</span>
+          <strong>{inviteUrl}</strong>
+        </div>
+      )}
+      {(leagueStatus.message || leagueStatus.error || shareStatus) && (
+        <p className={`auth-message ${leagueStatus.error ? 'error' : ''}`}>
+          {leagueStatus.error || leagueStatus.message || shareStatus}
+        </p>
+      )}
+      <div className="league-stats">
+        <div>
+          <strong>{leagueRows.length}</strong>
+          <span>Members</span>
+        </div>
+        <div>
+          <strong>{leagueRows.reduce((total, member) => total + member.savedPicks, 0)}</strong>
+          <span>Saved picks</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function LeagueStandings({ league, rows, onViewPredictions }) {
+  return (
+    <div className="panel league-standings">
+      <div className="panel-head">
+        <div>
+          <p className="eyebrow">{league.name}</p>
+          <h2>League standings</h2>
+        </div>
+        <span className="pill">Invite-only</span>
+      </div>
+      {rows.length === 0 && (
+        <div className="empty-state">Create a league or join one with an invite code.</div>
+      )}
+      {rows.map((member, index) => (
+        <div className="league-member-row" key={member.id}>
+          <span className="rank">{index + 1}</span>
+          <div className="member-main">
             <strong>{member.displayName}</strong>
-            <span>{member.role}</span>
+            <small>{member.role} - {member.savedPicks}/{member.targetPicks} picks saved</small>
+            <div className="completion-track">
+              <span style={{ width: `${member.percent}%` }} />
+            </div>
           </div>
-        ))}
+          <div className="member-score">
+            <strong>{member.points}</strong>
+            <span>pts</span>
+          </div>
+          <button className="view-picks-button" onClick={() => onViewPredictions(member.id)}>
+            <Eye size={15} /> View picks
+          </button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function LeagueActivity({ league }) {
+  return (
+    <aside className="panel league-activity-panel">
+      <div className="panel-head">
+        <div>
+          <p className="eyebrow">League feed</p>
+          <h2>Activity</h2>
+        </div>
       </div>
       <div className="activity-feed">
-        {league.activity.slice(0, 4).map((activity) => (
+        {league.activity.length === 0 && <p>No league activity yet.</p>}
+        {league.activity.slice(0, 8).map((activity) => (
           <p key={activity.id}>{activity.text}</p>
         ))}
+      </div>
+    </aside>
+  )
+}
+
+function MemberPredictionModal({ member, onClose }) {
+  const predictions = member.predictions ?? []
+  const awardRows = member.awardPicks ?? []
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
+      <div className="panel member-modal">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Member picks</p>
+            <h2>{member.displayName}</h2>
+          </div>
+          <button className="secondary" onClick={onClose}>Close</button>
+        </div>
+        <div className="prediction-list">
+          <h3>Match predictions</h3>
+          {predictions.length === 0 && <p className="empty-state">No match predictions saved yet.</p>}
+          {predictions.map((prediction) => (
+            <div key={prediction.id}>
+              <strong>{prediction.stage}</strong>
+              <span>{prediction.homeTeam} {prediction.predictedHomeScore}-{prediction.predictedAwayScore} {prediction.awayTeam}</span>
+              {prediction.advancingTeam && <small>{prediction.advancingTeam} advances</small>}
+            </div>
+          ))}
+          <h3>Awards</h3>
+          {awardRows.length === 0 && <p className="empty-state">No award picks saved yet.</p>}
+          {awardRows.map((awardPick) => (
+            <div key={awardPick.awardKey}>
+              <strong>{awardPick.awardLabel}</strong>
+              <span>{awardPick.recipient}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   )

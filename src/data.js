@@ -109,13 +109,6 @@ export const groupMatchEvents = [
   { time: "18'", type: 'Goal', detail: 'Mexico strike first from a set piece', score: '1-0', state: 'correct' },
 ]
 
-export const friends = [
-  { name: 'Alex', round: 420, awards: 80, exact: 7, total: 1260, status: 'You' },
-  { name: 'Maya', round: 390, awards: 120, exact: 8, total: 1245, status: '+18 today' },
-  { name: 'Sam', round: 405, awards: 40, exact: 6, total: 1180, status: 'Live jump' },
-  { name: 'Jamie', round: 350, awards: 100, exact: 4, total: 1085, status: '2 picks left' },
-]
-
 export const liveEvents = [
   { time: "90+4'", type: 'Full time', detail: 'Spain win the quarterfinal', score: '2-1', state: 'correct' },
   { time: "81'", type: 'Goal', detail: 'Musiala curls in from the edge', score: '2-1', state: 'missed' },

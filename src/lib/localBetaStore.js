@@ -1,23 +1,21 @@
-const STORAGE_KEY = 'mymundial.localBeta.v1'
+const STORAGE_KEY = 'mymundial.localBeta.v2'
 
 const defaultProfile = {
   id: 'local-user',
-  displayName: 'Alex',
-  email: 'alex@mymundial.test',
+  displayName: 'Guest',
+  email: '',
   favoriteTeam: 'Mexico',
 }
 
 const defaultLeague = {
   id: 'local-league',
-  name: "Marco's bracket room",
-  inviteCode: 'MYMUNDIAL26',
+  name: 'Create or join a private league',
+  inviteCode: 'SIGNIN',
   members: [
-    { id: 'local-user', displayName: 'Alex', role: 'owner', points: 0 },
-    { id: 'maya', displayName: 'Maya', role: 'member', points: 0 },
-    { id: 'sam', displayName: 'Sam', role: 'member', points: 0 },
+    { id: 'local-user', displayName: 'Guest', role: 'owner', points: 0, predictionCount: 0, awardCount: 0, predictions: [], awardPicks: [] },
   ],
   activity: [
-    { id: 'seed-1', text: 'League created for World Cup 2026 predictions.', createdAt: new Date().toISOString() },
+    { id: 'seed-1', text: 'Sign in to create a private league.', createdAt: new Date().toISOString() },
   ],
 }
 
@@ -92,7 +90,7 @@ export const betaStore = {
       id: `league-${Date.now()}`,
       name: name?.trim() || 'MyMundial private league',
       inviteCode,
-      members: [{ id: profile.id, displayName: profile.displayName, role: 'owner', points: 0 }],
+      members: [{ id: profile.id, displayName: profile.displayName, role: 'owner', points: 0, predictionCount: 0, awardCount: 0, predictions: [], awardPicks: [] }],
       activity: [{
         id: `activity-${Date.now()}`,
         text: `${profile.displayName} created ${name?.trim() || 'a private league'}.`,
@@ -110,7 +108,7 @@ export const betaStore = {
       ...state.league,
       members: alreadyMember
         ? state.league.members
-        : [...state.league.members, { id: profile.id, displayName: profile.displayName, role: 'member', points: 0 }],
+        : [...state.league.members, { id: profile.id, displayName: profile.displayName, role: 'member', points: 0, predictionCount: 0, awardCount: 0, predictions: [], awardPicks: [] }],
       activity: [
         {
           id: `activity-${Date.now()}`,
@@ -161,6 +159,7 @@ export const betaStore = {
       updatedAt: now,
       resultState: locked ? 'locked' : 'draft',
     }
+    const nextPredictions = { ...state.predictions, [prediction.id]: prediction }
     const league = {
       ...state.league,
       activity: [
@@ -171,11 +170,16 @@ export const betaStore = {
         },
         ...state.league.activity.slice(0, 7),
       ],
+      members: state.league.members.map((member) =>
+        member.id === profile.id
+          ? { ...member, predictionCount: Object.keys(nextPredictions).filter((key) => key.startsWith(`${profile.id}:`)).length, lastSavedAt: now }
+          : member,
+      ),
     }
     writeState({
       ...state,
       league,
-      predictions: { ...state.predictions, [prediction.id]: prediction },
+      predictions: nextPredictions,
       lastSavedAt: now,
     })
     return prediction
@@ -213,6 +217,11 @@ export const betaStore = {
         },
         ...state.league.activity.slice(0, 7),
       ],
+      members: state.league.members.map((member) =>
+        member.id === profile.id
+          ? { ...member, predictionCount: Object.keys({ ...state.predictions, ...predictions }).filter((key) => key.startsWith(`${profile.id}:`)).length, lastSavedAt: now }
+          : member,
+      ),
     }
     writeState({
       ...state,
@@ -249,12 +258,22 @@ export const betaStore = {
       updatedAt: now,
       resultState: 'draft',
     }
+    const nextAwardPicks = {
+      ...(state.awardPicks ?? {}),
+      [award.id]: awardPick,
+    }
+    const league = {
+      ...state.league,
+      members: state.league.members.map((member) =>
+        member.id === state.profile.id
+          ? { ...member, awardCount: Object.keys(nextAwardPicks).length, lastSavedAt: now }
+          : member,
+      ),
+    }
     writeState({
       ...state,
-      awardPicks: {
-        ...(state.awardPicks ?? {}),
-        [award.id]: awardPick,
-      },
+      league,
+      awardPicks: nextAwardPicks,
       lastSavedAt: now,
     })
     return awardPick

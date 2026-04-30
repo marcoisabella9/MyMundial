@@ -1469,7 +1469,7 @@ h3 {
 }
 
 .leagues-page {
-  grid-template-columns: minmax(340px, 0.75fr) minmax(320px, 0.65fr) minmax(320px, 0.6fr);
+  grid-template-columns: minmax(340px, 0.62fr) minmax(420px, 1fr) minmax(280px, 0.48fr);
 }
 
 .form-grid {
@@ -1627,6 +1627,164 @@ h3 {
   border-radius: 8px;
   background: #f5f8f6;
   padding: 10px 12px;
+}
+
+.invite-card,
+.league-stats {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.invite-card {
+  border: 1px solid #dce6df;
+  border-radius: 8px;
+  background: #fbfdfc;
+  padding: 12px;
+}
+
+.invite-card span,
+.league-stats span,
+.member-score span,
+.member-main small,
+.prediction-list small {
+  color: #647067;
+  font-size: 12px;
+}
+
+.invite-card strong {
+  overflow-wrap: anywhere;
+  color: #17211b;
+  font-size: 13px;
+}
+
+.league-stats {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.league-stats div {
+  border-radius: 8px;
+  background: #f5f8f6;
+  padding: 12px;
+}
+
+.league-stats strong {
+  display: block;
+  font-size: 24px;
+}
+
+.league-standings {
+  align-content: start;
+}
+
+.league-member-row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 86px auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid #e1eae4;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.member-main {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.member-main strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.completion-track {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #edf3ef;
+}
+
+.completion-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #0f8f4f;
+}
+
+.member-score {
+  display: grid;
+  gap: 2px;
+  text-align: right;
+}
+
+.view-picks-button {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #dce6df;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #17211b;
+  cursor: pointer;
+  font-weight: 800;
+  padding: 0 10px;
+}
+
+.view-picks-button:hover {
+  border-color: #0f8f4f;
+  color: #0f8f4f;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  background: rgba(7, 18, 14, 0.55);
+  padding: 20px;
+}
+
+.member-modal {
+  width: min(720px, 100%);
+  max-height: min(760px, calc(100svh - 40px));
+  overflow: auto;
+}
+
+.member-modal .secondary {
+  border: 1px solid #dce6df;
+  border-radius: 8px;
+  background: #ffffff;
+  cursor: pointer;
+  padding: 8px 12px;
+}
+
+.prediction-list {
+  display: grid;
+  gap: 10px;
+}
+
+.prediction-list h3 {
+  margin-top: 10px;
+  color: #17211b;
+  font-size: 14px;
+}
+
+.prediction-list div {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #e1eae4;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px 12px;
+}
+
+.prediction-list span {
+  color: #536158;
 }
 
 .readiness-grid {
@@ -1807,8 +1965,14 @@ h3 {
 
   .form-grid,
   .account-summary,
-  .button-row {
+  .button-row,
+  .league-stats,
+  .league-member-row {
     grid-template-columns: 1fr;
+  }
+
+  .member-score {
+    text-align: left;
   }
 
   .pick-console div {
