@@ -91,28 +91,6 @@ The save state matters: if you change scores but do not save, friends will not s
 - Football data target: API-FOOTBALL/API-SPORTS for V1 fixtures, scores, standings, and results.
 - Server-side football provider sync is still the next major production milestone.
 
-## Maintainer Notes
-
-Apply Supabase migrations from the `supabase/migrations` folder when setting up or updating a database.
-
-Important migrations for the current app:
-
-- `202604280001_initial_schema.sql`
-- `202604290001_mvp_browser_persistence.sql`
-- `202604290002_private_league_visibility.sql`
-
-Keep these values out of the browser and out of committed files:
-
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `APIFOOTBALL_API_KEY`
-- `SYNC_CRON_SECRET`
-
-Only browser-safe values should be exposed through Vite variables:
-
-- `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_ANON_KEY`
-- `VITE_FOOTBALL_DATA_PROVIDER`
-
 ## Roadmap
 
 Next production priorities:
