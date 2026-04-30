@@ -1,15 +1,18 @@
 # MyMundial
 
-MyMundial is a World Cup prediction app moving from prototype toward a playable beta. V1 is intentionally focused on team winners, match scores, bracket advancement, private leagues, leaderboards, and tournament awards so the product can ship quickly.
+MyMundial is a World Cup 2026 prediction app for making match picks, building a knockout bracket, choosing tournament awards, and competing with friends in private leagues.
 
-## Current Foundation
+The current V1 is intentionally focused on the fastest useful product:
 
-- React/Vite browser app.
-- Local beta persistence for profile, league, saved scores, and saved predictions.
-- Supabase migration for profiles, leagues, members, teams, fixtures, predictions, award picks, and scoring results.
-- Supabase Edge Function scaffold for server-side football provider sync.
-- Provider adapter contract with API-FOOTBALL as the first V1 target and Sportmonks as a backup check.
-- `.env.example` documenting required browser and server variables.
+- Group-stage score predictions
+- Dynamic Round of 32 knockout bracket advancement
+- Knockout score predictions, including draw scores with an advancing team
+- Tournament award picks
+- Account-based saved predictions
+- Private leagues with invite links, member standings, activity, and prediction viewing
+- A Supabase-backed foundation for auth, profiles, leagues, memberships, picks, and awards
+
+Lineups, scorer picks, man of the match picks, and live player-event props are post-MVP.
 
 ## Run Locally
 
@@ -18,7 +21,11 @@ npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite, usually `http://127.0.0.1:5173/`.
+Open the local URL printed by Vite, usually:
+
+```text
+http://localhost:5173/
+```
 
 ## Validate
 
@@ -27,20 +34,91 @@ npm run lint
 npm run build
 ```
 
-## Production Setup Sequence
+## User Guide
 
-1. Create a Supabase project.
-2. Apply `supabase/migrations/202604280001_initial_schema.sql`.
-3. Copy `.env.example` to `.env.local` and fill in Supabase browser keys.
-4. Add provider keys as server-side secrets, not Vite variables.
-5. Deploy `supabase/functions/sync-football-data`.
-6. Trial API-FOOTBALL for fixtures, teams, scores, standings, and results.
-7. Replace local beta persistence with Supabase table reads/writes.
+### Create An Account
 
-## Deferred Until After MVP
+1. Open MyMundial.
+2. Use the account panel to sign up or sign in.
+3. Set a display name so friends can recognize you in private leagues.
+4. Saved picks sync to your account after you use the save buttons.
 
-Lineups, scorer picks, MOTM, live player events, and other player-level props are intentionally out of the launch path. They should come back only after accounts, private leagues, saved predictions, football result sync, and settlement are working reliably.
+Guest mode can be used for local testing, but private league sharing is designed for signed-in users.
 
-## Important Security Rule
+### Make Group Stage Picks
 
-Football API keys and Supabase service-role keys must never be exposed to the browser. Keep them in Supabase Edge Functions or a server-side API layer.
+1. Go to `Groups`.
+2. Pick scores for each group-stage match.
+3. A 0-0 draw is allowed.
+4. The group tables update from your score picks.
+5. The top two teams in each group plus the best third-place teams feed the Round of 32 bracket.
+
+### Make Knockout Picks
+
+1. Go to `Bracket` or use `Next match` from the match screen.
+2. Pick a score for each knockout match.
+3. If the score is tied, choose which team advances.
+4. Winners automatically advance through the bracket.
+5. The third-place match is included alongside the final path.
+
+### Save Predictions
+
+Use `Save prediction` on an individual match, or `Save all predictions` from the left sidebar to sync everything to your account.
+
+The save state matters: if you change scores but do not save, friends will not see those updated picks in league comparison views.
+
+### Pick Tournament Awards
+
+1. Go to `Awards`.
+2. Choose each award category.
+3. Search for a candidate or type a custom name.
+4. Golden Glove is limited to goalkeeper-style picks.
+5. Save each award pick so it appears in your account and league views.
+
+### Create Or Join A Private League
+
+1. Go to `Leagues`.
+2. Create a league and copy the invite link.
+3. Share the invite link or invite code with friends.
+4. Friends can sign in, open the link, and join the league.
+5. League standings show members, saved-pick progress, points, activity, and a `View picks` action for each member.
+
+## Current Production Notes
+
+- Frontend: React and Vite.
+- Hosting: Vercel.
+- Auth/database: Supabase.
+- Football data target: API-FOOTBALL/API-SPORTS for V1 fixtures, scores, standings, and results.
+- Server-side football provider sync is still the next major production milestone.
+
+## Maintainer Notes
+
+Apply Supabase migrations from the `supabase/migrations` folder when setting up or updating a database.
+
+Important migrations for the current app:
+
+- `202604280001_initial_schema.sql`
+- `202604290001_mvp_browser_persistence.sql`
+- `202604290002_private_league_visibility.sql`
+
+Keep these values out of the browser and out of committed files:
+
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `APIFOOTBALL_API_KEY`
+- `SYNC_CRON_SECRET`
+
+Only browser-safe values should be exposed through Vite variables:
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+- `VITE_FOOTBALL_DATA_PROVIDER`
+
+## Roadmap
+
+Next production priorities:
+
+1. Harden private league QA across multiple real accounts and devices.
+2. Implement football results sync for fixtures, scores, standings, and final results.
+3. Add scoring settlement jobs for match winners, exact scores, goal difference, bracket advancement, and awards.
+4. Add lock rules for match kickoff and award deadlines.
+5. Polish mobile flows and onboarding before sharing widely.
