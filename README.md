@@ -41,9 +41,9 @@ npm run build
 1. Open MyMundial.
 2. Use the account panel to sign up or sign in.
 3. Set a display name so friends can recognize you in private leagues.
-4. Saved picks sync to your account after you use the save buttons.
+4. Picks autosave to your account after you change or confirm them.
 
-Guest mode can be used for local testing, but private league sharing is designed for signed-in users.
+Signed-out users can browse the app, but predictions are not saved unless they sign in.
 
 ### Make Group Stage Picks
 
@@ -61,11 +61,11 @@ Guest mode can be used for local testing, but private league sharing is designed
 4. Winners automatically advance through the bracket.
 5. The third-place match is included alongside the final path.
 
-### Save Predictions
+### Autosave Predictions
 
-Use `Save prediction` on an individual match, or `Save all predictions` from the left sidebar to sync everything to your account.
+After signing in, score changes autosave to your account after a short moment.
 
-The save state matters: if you change scores but do not save, friends will not see those updated picks in league comparison views.
+For a default 0-0 score, use `Confirm current pick` to mark that score as intentional. For knockout draws, choose the team that advances; the pick autosaves after the advancing team is selected.
 
 ### Pick Tournament Awards
 

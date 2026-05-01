@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   BarChart3,
   CalendarClock,
@@ -21,8 +21,7 @@ import {
 } from 'lucide-react'
 import './App.css'
 import { awardCandidateCatalog, awards, groupMatchEvents, groups, liveEvents, teamMeta } from './data'
-import { hasSupabaseConfig, runtimeMode } from './lib/config'
-import { betaStore } from './lib/localBetaStore'
+import { hasSupabaseConfig } from './lib/config'
 import { supabase } from './lib/supabaseClient'
 import { supabaseMvpStore } from './lib/supabaseMvpStore'
 
@@ -173,6 +172,21 @@ function emptyLeague() {
   }
 }
 
+function blankProfile() {
+  return {
+    id: '',
+    displayName: '',
+    email: '',
+    favoriteTeam: 'Mexico',
+  }
+}
+
+function freshGroupScores() {
+  return Object.fromEntries(
+    Object.entries(initialGroupScores).map(([id, score]) => [id, { ...score }]),
+  )
+}
+
 const defaultMatchContext = {
   id: 'A-1',
   type: 'group',
@@ -266,27 +280,27 @@ function App() {
   const [authMode, setAuthMode] = useState('sign-in')
   const [authForm, setAuthForm] = useState({ displayName: '', email: '', password: '' })
   const [authStatus, setAuthStatus] = useState({ loading: Boolean(supabase), message: '', error: '' })
-  const [saveStatus, setSaveStatus] = useState({ loading: false, message: '', error: '' })
-  const [bulkSaveStatus, setBulkSaveStatus] = useState({ loading: false, message: '', error: '' })
+  const [saveStatus, setSaveStatus] = useState({ loading: false, message: 'Sign in to autosave picks.', error: '' })
   const [awardSaveStatus, setAwardSaveStatus] = useState({ loading: false, message: '', error: '' })
   const [leagueStatus, setLeagueStatus] = useState({ loading: false, message: '', error: '' })
   const [shareStatus, setShareStatus] = useState('')
   const [selectedLeagueMemberId, setSelectedLeagueMemberId] = useState(null)
-  const [profile, setProfile] = useState(() => betaStore.loadProfile())
-  const [profileDraft, setProfileDraft] = useState(() => betaStore.loadProfile())
-  const [league, setLeague] = useState(() => betaStore.loadLeague())
-  const [leagueName, setLeagueName] = useState(() => betaStore.loadLeague().name)
+  const [profile, setProfile] = useState(blankProfile)
+  const [profileDraft, setProfileDraft] = useState(blankProfile)
+  const [league, setLeague] = useState(emptyLeague)
+  const [leagueName, setLeagueName] = useState('MyMundial private league')
   const [inviteCode, setInviteCode] = useState(initialInviteCode)
-  const [predictionCount, setPredictionCount] = useState(() => betaStore.countPredictions())
-  const [lastSavedAt, setLastSavedAt] = useState(() => betaStore.lastSavedAt())
-  const [groupScores, setGroupScores] = useState(() => betaStore.loadGroupScores(initialGroupScores))
-  const [bracketScores, setBracketScores] = useState(() => betaStore.loadBracketScores())
+  const [predictionCount, setPredictionCount] = useState(0)
+  const [lastSavedAt, setLastSavedAt] = useState(null)
+  const [groupScores, setGroupScores] = useState(freshGroupScores)
+  const [bracketScores, setBracketScores] = useState({})
   const [selectedAward, setSelectedAward] = useState('potm')
-  const [awardPicks, setAwardPicks] = useState(() => betaStore.loadAwardPicks())
+  const [awardPicks, setAwardPicks] = useState({})
   const [matchContext, setMatchContext] = useState(defaultMatchContext)
+  const [dirtyPick, setDirtyPick] = useState(null)
+  const autosaveTimerRef = useRef(null)
   const currentUser = session?.user ?? null
   const isSignedIn = Boolean(currentUser)
-  const persistenceMode = isSignedIn ? 'supabase' : 'local'
 
   useEffect(() => {
     if (!supabase) return undefined
@@ -347,7 +361,12 @@ function App() {
         setAwardPicks(remoteAwardPicks)
         setAuthStatus({
           loading: false,
-          message: remotePredictions.length > 0 ? 'Synced saved picks from Supabase.' : 'Signed in. Save a pick to sync it.',
+          message: remotePredictions.length > 0 ? 'Synced saved picks from Supabase.' : 'Signed in. Picks will autosave.',
+          error: '',
+        })
+        setSaveStatus({
+          loading: false,
+          message: 'Autosave is on.',
           error: '',
         })
       } catch (error) {
@@ -361,14 +380,6 @@ function App() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.id])
-
-  useEffect(() => {
-    betaStore.saveGroupScores(groupScores)
-  }, [groupScores])
-
-  useEffect(() => {
-    betaStore.saveBracketScores(bracketScores)
-  }, [bracketScores])
 
   const standings = useMemo(() => buildStandings(groupScores), [groupScores])
 
@@ -580,6 +591,45 @@ function App() {
     : activeScore.homeScore !== activeScore.awayScore || Boolean(activeScore.advancerTeam)
   const projectedPoints = pickComplete ? 160 : 0
 
+  useEffect(() => {
+    if (!dirtyPick) return undefined
+    const { context, score } = dirtyPick
+    const autosaveKey = `${context.id}:${score.homeScore}:${score.awayScore}:${score.advancerTeam ?? ''}:${score.touched ? '1' : '0'}`
+    const isComplete = context.type === 'group'
+      ? score.touched
+      : score.homeScore !== score.awayScore || Boolean(score.advancerTeam)
+    if (!isComplete || !isSignedIn) return undefined
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current)
+    autosaveTimerRef.current = window.setTimeout(async () => {
+      try {
+        setSaveStatus({ loading: true, message: 'Autosaving pick...', error: '' })
+        await supabaseMvpStore.savePrediction({
+          profile,
+          context,
+          score,
+          locked: false,
+          league,
+        })
+        const remotePredictions = await supabaseMvpStore.loadPredictions(currentUser)
+        const remoteLeague = await supabaseMvpStore.loadLeague(currentUser)
+        setPredictionCount(remotePredictions.length)
+        setLastSavedAt(latestPredictionTime(remotePredictions))
+        if (remoteLeague) setLeague(remoteLeague)
+        setSaveStatus({ loading: false, message: 'Autosaved to your account.', error: '' })
+        setDirtyPick((current) => {
+          if (!current) return current
+          const currentKey = `${current.context.id}:${current.score.homeScore}:${current.score.awayScore}:${current.score.advancerTeam ?? ''}:${current.score.touched ? '1' : '0'}`
+          return currentKey === autosaveKey ? null : current
+        })
+      } catch (error) {
+        setSaveStatus({ loading: false, message: '', error: error.message })
+      }
+    }, 650)
+    return () => {
+      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current)
+    }
+  }, [currentUser, dirtyPick, isSignedIn, league, profile])
+
   function openMatch(context) {
     setMatchContext(context)
     setView('match')
@@ -594,68 +644,82 @@ function App() {
 
   function updateScore(team, delta) {
     const key = team === matchContext.home ? 'homeScore' : 'awayScore'
-    const updater = (currentScore) => {
-      const nextScore = {
-        ...currentScore,
-        [key]: Math.max(0, currentScore[key] + delta),
-        touched: true,
-      }
-      if (nextScore.homeScore !== nextScore.awayScore) delete nextScore.advancerTeam
-      return nextScore
+    const nextScore = {
+      ...activeScore,
+      home: matchContext.home,
+      away: matchContext.away,
+      [key]: Math.max(0, activeScore[key] + delta),
+      touched: true,
     }
+    if (nextScore.homeScore !== nextScore.awayScore) delete nextScore.advancerTeam
+    const needsAdvancer = matchContext.type === 'bracket' && nextScore.homeScore === nextScore.awayScore && !nextScore.advancerTeam
     if (matchContext.type === 'group') {
-      setGroupScores((current) => ({ ...current, [matchContext.id]: updater(current[matchContext.id]) }))
+      setGroupScores((current) => ({ ...current, [matchContext.id]: nextScore }))
     } else {
       setBracketScores((current) => ({
         ...current,
-        [matchContext.id]: updater(current[matchContext.id] ?? {
-          home: matchContext.home,
-          away: matchContext.away,
-          homeScore: matchContext.fallbackHome ?? 2,
-          awayScore: matchContext.fallbackAway ?? 1,
-        }),
+        [matchContext.id]: nextScore,
       }))
     }
+    setDirtyPick({ context: matchContext, score: nextScore })
+    setSaveStatus({
+      loading: false,
+      message: !isSignedIn
+        ? 'Sign in to autosave predictions.'
+        : needsAdvancer
+          ? 'Choose who advances to autosave this knockout pick.'
+          : 'Autosave queued.',
+      error: '',
+    })
   }
 
   function pickAdvancer(team) {
     if (matchContext.type !== 'bracket') return
+    const nextScore = {
+      ...activeScore,
+      home: matchContext.home,
+      away: matchContext.away,
+      homeScore: activeScore.homeScore,
+      awayScore: activeScore.awayScore,
+      touched: true,
+      advancerTeam: team,
+    }
     setBracketScores((current) => ({
       ...current,
-      [matchContext.id]: {
-        ...current[matchContext.id],
-        home: matchContext.home,
-        away: matchContext.away,
-        homeScore: activeScore.homeScore,
-        awayScore: activeScore.awayScore,
-        touched: true,
-        advancerTeam: team,
-      },
+      [matchContext.id]: nextScore,
     }))
+    setDirtyPick({ context: matchContext, score: nextScore })
+    setSaveStatus({
+      loading: false,
+      message: isSignedIn ? 'Autosave queued.' : 'Sign in to autosave predictions.',
+      error: '',
+    })
   }
 
-  function markCurrentScoreTouched() {
+  function confirmCurrentPick() {
+    const scoreToConfirm = {
+      ...activeScore,
+      home: matchContext.home,
+      away: matchContext.away,
+      touched: true,
+    }
     if (matchContext.type === 'group') {
       setGroupScores((current) => ({
         ...current,
-        [matchContext.id]: {
-          ...current[matchContext.id],
-          touched: true,
-        },
+        [matchContext.id]: scoreToConfirm,
       }))
     } else {
       setBracketScores((current) => ({
         ...current,
-        [matchContext.id]: {
-          ...current[matchContext.id],
-          home: matchContext.home,
-          away: matchContext.away,
-          homeScore: activeScore.homeScore,
-          awayScore: activeScore.awayScore,
-          touched: true,
-        },
+        [matchContext.id]: scoreToConfirm,
       }))
     }
+    setDirtyPick({ context: matchContext, score: scoreToConfirm })
+    setSaveStatus({
+      loading: false,
+      message: isSignedIn ? 'Autosave queued.' : 'Sign in to autosave predictions.',
+      error: '',
+    })
   }
 
   async function handleAuthSubmit(event) {
@@ -688,15 +752,19 @@ function App() {
     try {
       await supabaseMvpStore.signOut()
       setSession(null)
-      setProfile(betaStore.loadProfile())
-      setProfileDraft(betaStore.loadProfile())
-      setLeague(betaStore.loadLeague())
-      setGroupScores(betaStore.loadGroupScores(initialGroupScores))
-      setBracketScores(betaStore.loadBracketScores())
-      setAwardPicks(betaStore.loadAwardPicks())
-      setPredictionCount(betaStore.countPredictions())
-      setLastSavedAt(betaStore.lastSavedAt())
-      setAuthStatus({ loading: false, message: 'Signed out. Guest mode is active.', error: '' })
+      const blank = blankProfile()
+      setProfile(blank)
+      setProfileDraft(blank)
+      setLeague(emptyLeague())
+      setLeagueName('MyMundial private league')
+      setGroupScores(freshGroupScores())
+      setBracketScores({})
+      setAwardPicks({})
+      setPredictionCount(0)
+      setLastSavedAt(null)
+      setDirtyPick(null)
+      setSaveStatus({ loading: false, message: 'Sign in to autosave picks.', error: '' })
+      setAuthStatus({ loading: false, message: 'Signed out. Predictions are not saved unless you sign in.', error: '' })
     } catch (error) {
       setAuthStatus({ loading: false, message: '', error: error.message })
     }
@@ -716,10 +784,7 @@ function App() {
         setAuthStatus({ loading: false, message: 'Profile saved to Supabase.', error: '' })
         return
       }
-      const nextProfile = betaStore.saveProfile(profileDraft)
-      setProfile(nextProfile)
-      setProfileDraft(nextProfile)
-      setLeague(betaStore.loadLeague())
+      setAuthStatus({ loading: false, message: '', error: 'Sign in before saving a profile.' })
     } catch (error) {
       setAuthStatus({ loading: false, message: '', error: error.message })
     }
@@ -795,104 +860,12 @@ function App() {
     }
   }
 
-  async function saveCurrentPrediction(locked = false) {
-    markCurrentScoreTouched()
-    const scoreToSave = { ...activeScore, touched: true }
-    setSaveStatus({ loading: true, message: locked ? 'Locking pick...' : 'Saving prediction...', error: '' })
-    try {
-      if (isSignedIn) {
-        await supabaseMvpStore.savePrediction({
-          profile,
-          context: matchContext,
-          score: scoreToSave,
-          locked,
-          league,
-        })
-        const remotePredictions = await supabaseMvpStore.loadPredictions(currentUser)
-        const remoteLeague = await supabaseMvpStore.loadLeague(currentUser)
-        setPredictionCount(remotePredictions.length)
-        setLastSavedAt(latestPredictionTime(remotePredictions))
-        if (remoteLeague) setLeague(remoteLeague)
-        setSaveStatus({ loading: false, message: locked ? 'Pick locked to your account.' : 'Prediction synced to your account.', error: '' })
-        return
-      }
-      betaStore.savePrediction({
-        profile,
-        context: matchContext,
-        score: scoreToSave,
-        locked,
-      })
-      setPredictionCount(betaStore.countPredictions())
-      setLastSavedAt(betaStore.lastSavedAt())
-      setLeague(betaStore.loadLeague())
-      setSaveStatus({ loading: false, message: 'Prediction saved locally. Sign in to sync across devices.', error: '' })
-    } catch (error) {
-      setSaveStatus({ loading: false, message: '', error: error.message })
+  function confirmDisplayedPick() {
+    if (matchContext.type === 'bracket' && activeScore.homeScore === activeScore.awayScore && !activeScore.advancerTeam) {
+      setSaveStatus({ loading: false, message: 'Choose who advances to autosave this knockout pick.', error: '' })
+      return
     }
-  }
-
-  function buildBulkPredictionItems() {
-    const nextGroupScores = Object.fromEntries(groupMatchContexts.map((context) => {
-      const score = groupScores[context.id] ?? {
-        home: context.home,
-        away: context.away,
-        homeScore: 0,
-        awayScore: 0,
-      }
-      return [context.id, {
-        ...score,
-        home: context.home,
-        away: context.away,
-        touched: true,
-      }]
-    }))
-    const groupItems = groupMatchContexts.map((context) => ({
-      context,
-      score: nextGroupScores[context.id],
-    }))
-    const bracketItems = knockoutMatchContexts.map((context) => {
-      const score = {
-        ...scoreForContext(context),
-        home: context.home,
-        away: context.away,
-        touched: true,
-      }
-      const complete = score.homeScore !== score.awayScore || Boolean(score.advancerTeam)
-      return complete ? { context, score } : null
-    }).filter(Boolean)
-    return { items: [...groupItems, ...bracketItems], nextGroupScores, bracketItems }
-  }
-
-  async function saveAllPredictions() {
-    const { items, nextGroupScores, bracketItems } = buildBulkPredictionItems()
-    if (!items.length) return
-    setBulkSaveStatus({ loading: true, message: `Saving ${items.length} picks...`, error: '' })
-    try {
-      setGroupScores(nextGroupScores)
-      if (bracketItems.length) {
-        setBracketScores((current) => ({
-          ...current,
-          ...Object.fromEntries(bracketItems.map(({ context, score }) => [context.id, score])),
-        }))
-      }
-      if (isSignedIn) {
-        await supabaseMvpStore.savePredictions({ profile, items, locked: false, league })
-        const remotePredictions = await supabaseMvpStore.loadPredictions(currentUser)
-        const remoteLeague = await supabaseMvpStore.loadLeague(currentUser)
-        setPredictionCount(remotePredictions.length)
-        setLastSavedAt(latestPredictionTime(remotePredictions))
-        if (remoteLeague) setLeague(remoteLeague)
-        setBulkSaveStatus({ loading: false, message: `${remotePredictions.length} picks synced.`, error: '' })
-        return
-      }
-      betaStore.savePredictions({ profile, items, locked: false })
-      setPredictionCount(betaStore.countPredictions())
-      setLastSavedAt(betaStore.lastSavedAt())
-      setLeague(betaStore.loadLeague())
-      setBulkSaveStatus({ loading: false, message: `${items.length} picks saved locally.`, error: '' })
-    } catch (error) {
-      setBulkSaveStatus({ loading: false, message: '', error: error.message })
-    }
+    confirmCurrentPick()
   }
 
   async function saveAwardPick(award, recipient) {
@@ -908,10 +881,7 @@ function App() {
         setAwardSaveStatus({ loading: false, message: `${award.label} synced to your account.`, error: '' })
         return
       }
-      const savedAward = betaStore.saveAwardPick(award, recipient)
-      setAwardPicks((current) => ({ ...current, [award.id]: savedAward }))
-      setLastSavedAt(betaStore.lastSavedAt())
-      setAwardSaveStatus({ loading: false, message: `${award.label} saved locally. Sign in to sync it.`, error: '' })
+      setAwardSaveStatus({ loading: false, message: '', error: 'Sign in before saving award picks.' })
     } catch (error) {
       setAwardSaveStatus({ loading: false, message: '', error: error.message })
     }
@@ -940,18 +910,14 @@ function App() {
               </button>
             )
           })}
-          <button className="nav-save-all" onClick={saveAllPredictions} disabled={bulkSaveStatus.loading} title="Save all current picks">
-            {bulkSaveStatus.loading ? <RefreshSpinner /> : <Save size={18} />}
-            <span>{bulkSaveStatus.loading ? 'Saving...' : 'Save all predictions'}</span>
-          </button>
         </nav>
         <div className="side-card">
-          <span>{persistenceMode === 'supabase' ? 'Signed in' : runtimeMode === 'local-beta' ? 'Guest mode' : 'Sign in to sync'}</span>
+          <span>{isSignedIn ? 'Autosave on' : 'Sign in to save'}</span>
           <strong>{predictionCount}</strong>
-          <small>saved predictions</small>
-          {(bulkSaveStatus.message || bulkSaveStatus.error) && (
-            <small className={bulkSaveStatus.error ? 'side-error' : 'side-success'}>
-              {bulkSaveStatus.error || bulkSaveStatus.message}
+          <small>{isSignedIn ? 'saved predictions' : 'no picks saved'}</small>
+          {(saveStatus.message || saveStatus.error) && (
+            <small className={saveStatus.error ? 'side-error' : 'side-success'}>
+              {saveStatus.error || saveStatus.message}
             </small>
           )}
         </div>
@@ -972,7 +938,7 @@ function App() {
           <div className="status-strip">
             <div><strong>48</strong><span>teams loaded</span></div>
             <div><strong>{groupMatchups.length}</strong><span>group matches</span></div>
-            <div><strong>{runtimeMode === 'local-beta' ? 'Local' : 'Live'}</strong><span>persistence mode</span></div>
+            <div><strong>{isSignedIn ? 'On' : 'Off'}</strong><span>autosave</span></div>
             <div><strong>{projectedPoints}</strong><span>active pick points</span></div>
           </div>
         )}
@@ -1046,7 +1012,7 @@ function App() {
               onBack={() => setView(matchContext.backView)}
               onPreviousMatch={() => goToAdjacentMatch(-1)}
               onNextMatch={() => goToAdjacentMatch(1)}
-              onSavePrediction={() => saveCurrentPrediction(false)}
+              onConfirmPick={confirmDisplayedPick}
               onPickAdvancer={pickAdvancer}
               pickComplete={pickComplete}
               isKnockoutTie={isKnockoutTie}
@@ -1128,8 +1094,8 @@ function SignedOutSplash({ onOpenAccount }) {
     <section className="splash-panel">
       <div>
         <p className="eyebrow">Ready to save your bracket?</p>
-        <h2>Create an account before you start picking</h2>
-        <p>Your predictions can stay on this device, but an account syncs them across devices and lets you join private leagues.</p>
+        <h2>Sign in before you start picking</h2>
+        <p>You can browse the tournament while signed out, but predictions only autosave to signed-in accounts.</p>
       </div>
       <button className="primary" onClick={onOpenAccount}><UserRound size={16} /> Sign in or create account</button>
     </section>
@@ -1140,7 +1106,7 @@ function SignedInGuide({ displayName }) {
   return (
     <section className="guide-panel">
       <strong>{displayName}, build your bracket in three passes</strong>
-      <span>Pick group scores, save each match, check the bracket path, then choose tournament awards.</span>
+      <span>Pick group scores, check the bracket path, then choose tournament awards. Your picks autosave after each change.</span>
     </section>
   )
 }
@@ -1246,7 +1212,7 @@ function MatchPanel({
   onBack,
   onPreviousMatch,
   onNextMatch,
-  onSavePrediction,
+  onConfirmPick,
   onPickAdvancer,
   pickComplete,
   isKnockoutTie,
@@ -1255,8 +1221,8 @@ function MatchPanel({
   compact = false,
 }) {
   const saveTooltip = isSignedIn
-    ? 'Click Save prediction to sync this pick to your account.'
-    : 'Click Save prediction to keep this pick on this device. Sign in to sync across devices.'
+    ? 'Autosave is on. Score changes sync to your account after a moment.'
+    : 'Sign in to autosave predictions to your account.'
   return (
     <aside className={`panel match-detail ${compact ? 'compact' : ''}`}>
       <div className="match-meta">
@@ -1308,12 +1274,12 @@ function MatchPanel({
       <div className="save-action-wrap">
         <button
           className={`save-pick ${saveStatus.loading ? 'saving' : ''}`}
-          onClick={onSavePrediction}
+          onClick={onConfirmPick}
           disabled={saveStatus.loading || (context.type === 'bracket' && !pickComplete)}
           title={saveTooltip}
         >
           {saveStatus.loading ? <RefreshSpinner /> : <Save size={16} />}
-          {saveStatus.loading ? 'Saving...' : context.type === 'bracket' && !pickComplete ? 'Pick advancer first' : 'Save prediction'}
+          {saveStatus.loading ? 'Autosaving...' : context.type === 'bracket' && !pickComplete ? 'Pick advancer first' : 'Confirm current pick'}
         </button>
         <div className="save-tooltip" title={saveTooltip}>
           <Info size={15} />
@@ -1327,7 +1293,7 @@ function MatchPanel({
         <ScoreLine label={context.type === 'bracket' ? 'Advancer picked' : 'Result picked'} value={pickComplete ? '+100' : 'pending'} state={pickComplete ? 'correct' : 'pending'} />
         <ScoreLine label="Exact score" value={pickComplete ? '+40' : 'pending'} state={pickComplete ? 'partial' : 'pending'} />
         <ScoreLine label="Goal difference" value={pickComplete ? '+20' : 'pending'} state={pickComplete ? 'partial' : 'pending'} />
-        <ScoreLine label="Saved to account" value={isSignedIn ? 'on save' : 'sign in'} state="pending" />
+        <ScoreLine label="Autosave" value={isSignedIn ? 'on' : 'sign in'} state="pending" />
       </div>
     </aside>
   )
@@ -1405,7 +1371,7 @@ function AccountPanel({
           <p className="eyebrow">Account</p>
           <h2>{isSignedIn ? 'Profile' : 'Sign in to play with friends'}</h2>
         </div>
-        <span className="pill"><UserRound size={14} /> {isSignedIn ? profile.displayName : 'Guest'}</span>
+        <span className="pill"><UserRound size={14} /> {isSignedIn ? profile.displayName : 'Signed out'}</span>
       </div>
       {!hasSupabaseConfig && (
         <div className="auth-note">
@@ -1477,6 +1443,7 @@ function AccountPanel({
           <input
             value={draft.displayName}
             onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))}
+            disabled={!isSignedIn}
           />
         </label>
         <label>
@@ -1484,6 +1451,7 @@ function AccountPanel({
           <input
             value={draft.email}
             onChange={(event) => setDraft((current) => ({ ...current, email: event.target.value }))}
+            disabled={!isSignedIn}
           />
         </label>
       </div>
@@ -1491,7 +1459,7 @@ function AccountPanel({
         <span>{predictionCount} saved predictions</span>
         <span>{lastSavedAt ? `Last saved ${new Date(lastSavedAt).toLocaleTimeString()}` : 'No saved pick yet'}</span>
       </div>
-      <button className="full-button" onClick={onSave}><Save size={16} /> {isSignedIn ? 'Save profile' : 'Save guest profile'}</button>
+      <button className="full-button" onClick={onSave} disabled={!isSignedIn}><Save size={16} /> Save profile</button>
     </div>
   )
 }
