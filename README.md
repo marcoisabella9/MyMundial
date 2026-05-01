@@ -67,6 +67,8 @@ After signing in, score changes autosave to your account after a short moment.
 
 For a default 0-0 score, use `Confirm current pick` to mark that score as intentional. For knockout draws, choose the team that advances; the pick autosaves after the advancing team is selected.
 
+Match picks lock at kickoff and award picks lock at the tournament deadline. The current app uses MVP fallback lock dates until the football API sync supplies official fixture kickoff times.
+
 ### Pick Tournament Awards
 
 1. Go to `Awards`.
@@ -100,5 +102,5 @@ Next production priorities:
 1. Harden private league QA across multiple real accounts and devices.
 2. Implement football results sync for fixtures, scores, standings, and final results.
 3. Add scoring settlement jobs for match winners, exact scores, goal difference, bracket advancement, and awards.
-4. Add lock rules for match kickoff and award deadlines.
+4. Replace MVP fallback lock dates with synced provider kickoff times.
 5. Polish mobile flows and onboarding before sharing widely.

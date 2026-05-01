@@ -77,6 +77,44 @@ const groupMatchups = groups.flatMap((group) => {
   }))
 })
 
+const GROUP_LOCK_AT_BY_DATE = {
+  'Jun 11': '2026-06-11T15:00:00-04:00',
+  'Jun 12': '2026-06-12T15:00:00-04:00',
+  'Jun 17': '2026-06-17T15:00:00-04:00',
+  'Jun 18': '2026-06-18T15:00:00-04:00',
+  'Jun 23': '2026-06-23T15:00:00-04:00',
+}
+
+const KNOCKOUT_LOCK_AT_BY_STAGE = {
+  R32: '2026-07-03T12:00:00-04:00',
+  R16: '2026-07-09T12:00:00-04:00',
+  QF: '2026-07-13T12:00:00-04:00',
+  SF: '2026-07-14T15:00:00-04:00',
+  Final: '2026-07-19T15:00:00-04:00',
+  '3rd Place': '2026-07-18T15:00:00-04:00',
+}
+
+const AWARD_LOCK_AT = '2026-06-11T15:00:00-04:00'
+
+function isLockedAt(lockAt) {
+  if (!lockAt) return false
+  return Date.now() >= new Date(lockAt).getTime()
+}
+
+function lockText(lockAt) {
+  if (!lockAt) return 'Prediction open'
+  if (isLockedAt(lockAt)) return 'Locked'
+  return 'Prediction open'
+}
+
+function groupLockAt(match) {
+  return GROUP_LOCK_AT_BY_DATE[match.date]
+}
+
+function knockoutLockAt(stage) {
+  return KNOCKOUT_LOCK_AT_BY_STAGE[stage]
+}
+
 const initialGroupScores = Object.fromEntries(
   groupMatchups.map((match) => [
     match.id,
@@ -195,6 +233,7 @@ const defaultMatchContext = {
   away: 'South Africa',
   venue: 'Group opener',
   date: 'Jun 11 - prediction open',
+  lockAt: GROUP_LOCK_AT_BY_DATE['Jun 11'],
   events: groupMatchEvents,
   backView: 'groups',
 }
@@ -539,7 +578,8 @@ function App() {
     home: match.home,
     away: match.away,
     venue: match.venue,
-    date: `${match.date} - prediction open`,
+    date: `${match.date} - ${lockText(groupLockAt(match)).toLowerCase()}`,
+    lockAt: groupLockAt(match),
     events: groupMatchEvents,
     backView: 'groups',
   })), [])
@@ -554,7 +594,8 @@ function App() {
         home: match.a.team,
         away: match.b.team,
         venue: match.label === 'Final' ? 'New York New Jersey Stadium' : match.label === '3rd Place' ? 'Hard Rock Stadium' : 'Mercedes-Benz Stadium',
-        date: 'Sat, Jul 4 - 9:00 PM',
+        date: `MVP schedule - ${lockText(knockoutLockAt(match.label ?? round)).toLowerCase()}`,
+        lockAt: knockoutLockAt(match.label ?? round),
         events: liveEvents,
         backView: 'bracket',
         fallbackHome: match.fallbackHome,
@@ -585,6 +626,8 @@ function App() {
   }
 
   const activeScore = scoreForContext(matchContext)
+  const activeLocked = isLockedAt(matchContext.lockAt)
+  const awardsLocked = isLockedAt(AWARD_LOCK_AT)
   const isKnockoutTie = matchContext.type === 'bracket' && activeScore.homeScore === activeScore.awayScore
   const pickComplete = matchContext.type === 'group'
     ? activeScore.touched
@@ -643,6 +686,10 @@ function App() {
   }
 
   function updateScore(team, delta) {
+    if (isLockedAt(matchContext.lockAt)) {
+      setSaveStatus({ loading: false, message: '', error: 'This match is locked. Picks can no longer be changed.' })
+      return
+    }
     const key = team === matchContext.home ? 'homeScore' : 'awayScore'
     const nextScore = {
       ...activeScore,
@@ -675,6 +722,10 @@ function App() {
 
   function pickAdvancer(team) {
     if (matchContext.type !== 'bracket') return
+    if (isLockedAt(matchContext.lockAt)) {
+      setSaveStatus({ loading: false, message: '', error: 'This match is locked. Picks can no longer be changed.' })
+      return
+    }
     const nextScore = {
       ...activeScore,
       home: matchContext.home,
@@ -697,6 +748,10 @@ function App() {
   }
 
   function confirmCurrentPick() {
+    if (isLockedAt(matchContext.lockAt)) {
+      setSaveStatus({ loading: false, message: '', error: 'This match is locked. Picks can no longer be changed.' })
+      return
+    }
     const scoreToConfirm = {
       ...activeScore,
       home: matchContext.home,
@@ -870,6 +925,10 @@ function App() {
 
   async function saveAwardPick(award, recipient) {
     setSelectedAward(award.id)
+    if (isLockedAt(AWARD_LOCK_AT)) {
+      setAwardSaveStatus({ loading: false, message: '', error: 'Awards are locked. Picks can no longer be changed.' })
+      return
+    }
     setAwardSaveStatus({ loading: true, message: `Saving ${award.label}...`, error: '' })
     try {
       if (isSignedIn) {
@@ -982,7 +1041,8 @@ function App() {
                           home: match.a?.team ?? 'TBD',
                           away: match.b?.team ?? 'TBD',
                           venue: match.label === 'Final' ? 'New York New Jersey Stadium' : match.label === '3rd Place' ? 'Hard Rock Stadium' : 'Mercedes-Benz Stadium',
-                          date: 'Sat, Jul 4 - 9:00 PM',
+                          date: `MVP schedule - ${lockText(knockoutLockAt(match.label ?? round)).toLowerCase()}`,
+                          lockAt: knockoutLockAt(match.label ?? round),
                           events: liveEvents,
                           backView: 'bracket',
                           fallbackHome: match.fallbackHome,
@@ -1018,6 +1078,7 @@ function App() {
               isKnockoutTie={isKnockoutTie}
               saveStatus={saveStatus}
               isSignedIn={isSignedIn}
+              isLocked={activeLocked}
             />
             <MvpMatchRail context={matchContext} score={activeScore} />
           </section>
@@ -1082,6 +1143,8 @@ function App() {
             onSaveAwardPick={saveAwardPick}
             awardSaveStatus={awardSaveStatus}
             isSignedIn={isSignedIn}
+            isLocked={awardsLocked}
+            lockLabel={lockText(AWARD_LOCK_AT)}
           />
         )}
       </section>
@@ -1172,7 +1235,8 @@ function GroupsView({ standings, openMatch, groupScores }) {
                         home: match.home,
                         away: match.away,
                         venue: match.venue,
-                        date: `${match.date} - prediction open`,
+                        date: `${match.date} - ${lockText(groupLockAt(match)).toLowerCase()}`,
+                        lockAt: groupLockAt(match),
                         events: groupMatchEvents,
                         backView: 'groups',
                       })}
@@ -1218,16 +1282,19 @@ function MatchPanel({
   isKnockoutTie,
   saveStatus,
   isSignedIn,
+  isLocked,
   compact = false,
 }) {
-  const saveTooltip = isSignedIn
+  const saveTooltip = isLocked
+    ? 'This match is locked. Picks can no longer be changed.'
+    : isSignedIn
     ? 'Autosave is on. Score changes sync to your account after a moment.'
     : 'Sign in to autosave predictions to your account.'
   return (
     <aside className={`panel match-detail ${compact ? 'compact' : ''}`}>
       <div className="match-meta">
         <button onClick={onBack}><ChevronRight size={16} /> Back to {context.backView === 'groups' ? 'Groups' : 'Bracket'}</button>
-        <span><CalendarClock size={15} /> {context.date}</span>
+        <span className={isLocked ? 'locked-text' : ''}><CalendarClock size={15} /> {context.date}</span>
       </div>
       <div className="match-jump">
         <button onClick={onPreviousMatch}>Previous match</button>
@@ -1246,9 +1313,9 @@ function MatchPanel({
         {[context.home, context.away].map((team) => (
           <div className="stepper" key={team}>
             <span>{team}</span>
-            <button onClick={() => updateScore(team, -1)}><CircleMinus size={18} /></button>
+            <button onClick={() => updateScore(team, -1)} disabled={isLocked}><CircleMinus size={18} /></button>
             <strong>{team === context.home ? score.homeScore : score.awayScore}</strong>
-            <button onClick={() => updateScore(team, 1)}><CirclePlus size={18} /></button>
+            <button onClick={() => updateScore(team, 1)} disabled={isLocked}><CirclePlus size={18} /></button>
           </div>
         ))}
       </div>
@@ -1260,7 +1327,7 @@ function MatchPanel({
           </div>
           <div>
             {[context.home, context.away].map((team) => (
-              <button className={score.advancerTeam === team ? 'selected' : ''} key={team} onClick={() => onPickAdvancer(team)}>
+              <button className={score.advancerTeam === team ? 'selected' : ''} key={team} onClick={() => onPickAdvancer(team)} disabled={isLocked}>
                 <TeamBadge team={team} />
               </button>
             ))}
@@ -1275,11 +1342,11 @@ function MatchPanel({
         <button
           className={`save-pick ${saveStatus.loading ? 'saving' : ''}`}
           onClick={onConfirmPick}
-          disabled={saveStatus.loading || (context.type === 'bracket' && !pickComplete)}
+          disabled={isLocked || saveStatus.loading || (context.type === 'bracket' && !pickComplete)}
           title={saveTooltip}
         >
           {saveStatus.loading ? <RefreshSpinner /> : <Save size={16} />}
-          {saveStatus.loading ? 'Autosaving...' : context.type === 'bracket' && !pickComplete ? 'Pick advancer first' : 'Confirm current pick'}
+          {isLocked ? 'Match locked' : saveStatus.loading ? 'Autosaving...' : context.type === 'bracket' && !pickComplete ? 'Pick advancer first' : 'Confirm current pick'}
         </button>
         <div className="save-tooltip" title={saveTooltip}>
           <Info size={15} />
@@ -1627,7 +1694,7 @@ function MemberPredictionModal({ member, onClose }) {
   )
 }
 
-function AwardsView({ selectedAward, setSelectedAward, awardPicks, onSaveAwardPick, awardSaveStatus, isSignedIn }) {
+function AwardsView({ selectedAward, setSelectedAward, awardPicks, onSaveAwardPick, awardSaveStatus, isSignedIn, isLocked, lockLabel }) {
   const [awardQuery, setAwardQuery] = useState('')
   const activeAward = awards.find((award) => award.id === selectedAward) ?? awards[0]
   const searchMeta = awardSearchMeta[activeAward.id] ?? awardSearchMeta.potm
@@ -1659,6 +1726,7 @@ function AwardsView({ selectedAward, setSelectedAward, awardPicks, onSaveAwardPi
   const canUseCustom = Boolean(cleanQuery && !exactEligibleCandidate && !knownButBlocked)
 
   function chooseAwardRecipient(recipient) {
+    if (isLocked) return
     onSaveAwardPick(activeAward, recipient)
     setAwardQuery('')
   }
@@ -1671,7 +1739,7 @@ function AwardsView({ selectedAward, setSelectedAward, awardPicks, onSaveAwardPi
             <p className="eyebrow">Tournament-long bonuses</p>
             <h2>Awards predictions</h2>
           </div>
-          <span className="pill">{isSignedIn ? 'Syncs to account' : 'Sign in to sync'}</span>
+          <span className={`pill ${isLocked ? 'locked-pill' : ''}`}>{isLocked ? lockLabel : isSignedIn ? 'Syncs to account' : 'Sign in to sync'}</span>
         </div>
         <div className="award-grid">
           {awards.map((award) => (
@@ -1696,6 +1764,7 @@ function AwardsView({ selectedAward, setSelectedAward, awardPicks, onSaveAwardPi
                 value={awardQuery}
                 onChange={(event) => setAwardQuery(event.target.value)}
                 placeholder={searchMeta.placeholder}
+                disabled={isLocked}
               />
             </label>
             <div className="award-picked">
@@ -1704,13 +1773,16 @@ function AwardsView({ selectedAward, setSelectedAward, awardPicks, onSaveAwardPi
             </div>
           </div>
           <p className="award-helper">{searchMeta.helper}</p>
+          {isLocked && (
+            <p className="save-message error">Awards are locked. Picks can no longer be changed.</p>
+          )}
           <div className="recipient-list">
             {activeCandidates.map((candidate) => (
               <button
                 key={`${candidate.name}-${candidate.team}`}
                 className={awardPicks[activeAward.id]?.recipient === candidate.name ? 'selected' : ''}
                 onClick={() => chooseAwardRecipient(candidate.name)}
-                disabled={awardSaveStatus.loading}
+                disabled={isLocked || awardSaveStatus.loading}
               >
                 <strong>{candidate.name}</strong>
                 <span>{candidate.team} - {candidate.position}</span>
@@ -1720,7 +1792,7 @@ function AwardsView({ selectedAward, setSelectedAward, awardPicks, onSaveAwardPi
               <button
                 className="custom-recipient"
                 onClick={() => chooseAwardRecipient(cleanQuery)}
-                disabled={awardSaveStatus.loading}
+                disabled={isLocked || awardSaveStatus.loading}
               >
                 <strong>{searchMeta.customLabel}</strong>
                 <span>{cleanQuery}</span>

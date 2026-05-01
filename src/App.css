@@ -358,6 +358,12 @@ h3 {
   color: #0d7d45;
 }
 
+.pill.locked-pill,
+.locked-text {
+  background: #fdebea;
+  color: #d94b3e;
+}
+
 .group-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(230px, 1fr));
@@ -856,6 +862,13 @@ h3 {
 .save-pick:disabled {
   cursor: not-allowed;
   opacity: 0.58;
+}
+
+.stepper button:disabled,
+.advancer-picker button:disabled,
+.award-search input:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .save-pick.saving {
