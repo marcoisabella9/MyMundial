@@ -11,9 +11,11 @@ import {
   Eye,
   Info,
   Medal,
+  Moon,
   Radio,
   Save,
   Sparkles,
+  Sun,
   UserRound,
   Trophy,
   Users,
@@ -33,9 +35,22 @@ const navItems = [
   { id: 'awards', label: 'Awards', icon: Medal },
 ]
 
+const viewTitles = {
+  groups: 'Group Stage',
+  bracket: 'Bracket Stage',
+  match: 'Match Pick',
+  leagues: 'Leagues',
+  awards: 'Awards',
+}
+
 function initialView() {
   if (typeof window === 'undefined') return 'groups'
   return new URLSearchParams(window.location.search).get('invite') ? 'leagues' : 'groups'
+}
+
+function initialTheme() {
+  if (typeof window === 'undefined') return 'light'
+  return window.localStorage.getItem('mymundial-theme') ?? 'light'
 }
 
 function initialInviteCode() {
@@ -337,9 +352,14 @@ function App() {
   const [awardPicks, setAwardPicks] = useState({})
   const [matchContext, setMatchContext] = useState(defaultMatchContext)
   const [dirtyPick, setDirtyPick] = useState(null)
+  const [theme, setTheme] = useState(initialTheme)
   const autosaveTimerRef = useRef(null)
   const currentUser = session?.user ?? null
   const isSignedIn = Boolean(currentUser)
+
+  useEffect(() => {
+    window.localStorage.setItem('mymundial-theme', theme)
+  }, [theme])
 
   useEffect(() => {
     if (!supabase) return undefined
@@ -632,7 +652,8 @@ function App() {
   const pickComplete = matchContext.type === 'group'
     ? activeScore.touched
     : activeScore.homeScore !== activeScore.awayScore || Boolean(activeScore.advancerTeam)
-  const projectedPoints = pickComplete ? 160 : 0
+  const pageTitle = `MyMundial ${viewTitles[view] ?? 'Cup Picks'}`
+  const isDark = theme === 'dark'
 
   useEffect(() => {
     if (!dirtyPick) return undefined
@@ -947,7 +968,7 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${isDark ? 'dark' : ''}`}>
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-mark"><Trophy size={22} /></span>
@@ -985,22 +1006,29 @@ function App() {
       <section className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Prediction studio</p>
-            <h1>MyMundial V1: scores, brackets, private leagues, and awards</h1>
+            <p className="eyebrow">MyMundial</p>
+            <h1>{pageTitle}</h1>
           </div>
-          <div className="top-actions">
-            <button onClick={() => setView('leagues')}><Users size={16} /> {isSignedIn ? profile.displayName : league.name}</button>
+          <div className="topbar-right">
+            <div className="top-actions">
+              <button
+                className="theme-toggle"
+                onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
+                aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+                title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+              >
+                {isDark ? <Sun size={16} /> : <Moon size={16} />}
+              </button>
+              <button onClick={() => setView('leagues')}><Users size={16} /> {isSignedIn ? profile.displayName : league.name}</button>
+            </div>
+            {view !== 'match' && (
+              <div className="tournament-summary">
+                <div><strong>{groupMatchups.length}</strong><span>group matches</span></div>
+                <div><strong>48</strong><span>teams</span></div>
+              </div>
+            )}
           </div>
         </header>
-
-        {view !== 'match' && (
-          <div className="status-strip">
-            <div><strong>48</strong><span>teams loaded</span></div>
-            <div><strong>{groupMatchups.length}</strong><span>group matches</span></div>
-            <div><strong>{isSignedIn ? 'On' : 'Off'}</strong><span>autosave</span></div>
-            <div><strong>{projectedPoints}</strong><span>active pick points</span></div>
-          </div>
-        )}
 
         {!isSignedIn && view !== 'leagues' && (
           <SignedOutSplash onOpenAccount={() => setView('leagues')} />
@@ -1067,7 +1095,6 @@ function App() {
             <MatchPanel
               score={activeScore}
               updateScore={updateScore}
-              projectedPoints={projectedPoints}
               context={matchContext}
               onBack={() => setView(matchContext.backView)}
               onPreviousMatch={() => goToAdjacentMatch(-1)}
@@ -1271,7 +1298,6 @@ function MatchTeam({ slot, score, picked }) {
 function MatchPanel({
   score,
   updateScore,
-  projectedPoints,
   context,
   onBack,
   onPreviousMatch,
@@ -1334,10 +1360,6 @@ function MatchPanel({
           </div>
         </div>
       )}
-      <div className="points-banner">
-        <Sparkles size={16} />
-        Projected lock value: {projectedPoints} pts
-      </div>
       <div className="save-action-wrap">
         <button
           className={`save-pick ${saveStatus.loading ? 'saving' : ''}`}

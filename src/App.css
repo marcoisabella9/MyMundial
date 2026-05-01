@@ -172,6 +172,13 @@ nav button:hover {
   margin-bottom: 18px;
 }
 
+.topbar-right {
+  display: grid;
+  justify-items: end;
+  gap: 12px;
+  align-self: start;
+}
+
 .eyebrow {
   margin: 0 0 5px;
   color: #0f8f4f;
@@ -191,7 +198,7 @@ p {
 h1 {
   max-width: 780px;
   margin-bottom: 0;
-  font-size: clamp(30px, 4vw, 54px);
+  font-size: clamp(34px, 4vw, 58px);
   line-height: 0.98;
   letter-spacing: 0;
 }
@@ -231,6 +238,11 @@ h3 {
   color: #17211b;
 }
 
+.theme-toggle {
+  width: 40px;
+  padding: 0;
+}
+
 .top-actions .primary,
 .full-button,
 .primary {
@@ -265,6 +277,152 @@ h3 {
   border-radius: 8px;
   background: #dce6df;
   margin-bottom: 18px;
+}
+
+.tournament-summary {
+  display: grid;
+  grid-template-columns: minmax(138px, auto) minmax(94px, auto);
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid #dce6df;
+  border-radius: 8px;
+  background: #dce6df;
+  min-width: 248px;
+}
+
+.tournament-summary div {
+  background: rgba(255, 255, 255, 0.86);
+  padding: 12px 16px;
+}
+
+.tournament-summary strong {
+  display: block;
+  font-size: 28px;
+  line-height: 1;
+}
+
+.tournament-summary span {
+  display: block;
+  margin-top: 4px;
+  color: #65736b;
+  font-size: 12px;
+}
+
+.app-shell.dark {
+  background:
+    radial-gradient(circle at 18% 8%, rgba(24, 141, 86, 0.18), transparent 28%),
+    linear-gradient(135deg, #101815 0%, #17211d 52%, #0d1512 100%);
+  color: #e9f4ee;
+}
+
+.app-shell.dark .workspace {
+  color: #e9f4ee;
+}
+
+.app-shell.dark .top-actions button,
+.app-shell.dark .match-meta button,
+.app-shell.dark .full-button.secondary,
+.app-shell.dark .tournament-summary,
+.app-shell.dark .status-strip {
+  border-color: #33453b;
+  background: #33453b;
+  color: #e9f4ee;
+}
+
+.app-shell.dark .top-actions button,
+.app-shell.dark .match-meta button,
+.app-shell.dark .tournament-summary div,
+.app-shell.dark .status-strip div,
+.app-shell.dark .panel,
+.app-shell.dark .splash-panel,
+.app-shell.dark .guide-panel,
+.app-shell.dark .group-card,
+.app-shell.dark .recipient-list button,
+.app-shell.dark .api-map div,
+.app-shell.dark .award-card,
+.app-shell.dark .score-hero,
+.app-shell.dark .stepper,
+.app-shell.dark .league-member-row,
+.app-shell.dark .activity-item,
+.app-shell.dark .auth-card {
+  background: rgba(20, 30, 26, 0.92);
+  border-color: #33453b;
+  color: #e9f4ee;
+}
+
+.app-shell.dark .panel {
+  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.26);
+}
+
+.app-shell.dark .team-code,
+.app-shell.dark .score-center strong,
+.app-shell.dark .score-controls strong,
+.app-shell.dark .score-line strong,
+.app-shell.dark .group-match strong,
+.app-shell.dark .league-member-row strong,
+.app-shell.dark .recipient-list button strong,
+.app-shell.dark .award-card span,
+.app-shell.dark .award-card strong {
+  color: #f7fff9;
+}
+
+.app-shell.dark .team-name,
+.app-shell.dark .seed,
+.app-shell.dark .tournament-summary span,
+.app-shell.dark .status-strip span,
+.app-shell.dark .group-title span,
+.app-shell.dark .api-map span,
+.app-shell.dark .note-list p,
+.app-shell.dark .check-list span,
+.app-shell.dark .award-card small,
+.app-shell.dark .save-tooltip,
+.app-shell.dark .award-helper,
+.app-shell.dark .score-line,
+.app-shell.dark .auth-card span,
+.app-shell.dark .account-summary,
+.app-shell.dark .mvp-grid p {
+  color: #a8bbb1;
+}
+
+.app-shell.dark input {
+  background: #101815;
+  border-color: #33453b;
+  color: #f7fff9;
+}
+
+.app-shell.dark .group-match,
+.app-shell.dark .score-line,
+.app-shell.dark .mvp-grid article,
+.app-shell.dark .recipient-panel,
+.app-shell.dark .points-stack .score-line {
+  background: #111c18;
+  border-color: #2e4037;
+}
+
+.app-shell.dark .group-match.no-pick,
+.app-shell.dark .match-card.pending {
+  background: rgba(93, 38, 34, 0.28);
+  border-color: rgba(236, 111, 99, 0.38);
+}
+
+.app-shell.dark .bracket-panel {
+  background:
+    linear-gradient(90deg, rgba(100, 170, 132, 0.08) 1px, transparent 1px) 0 0 / 20% 100%,
+    linear-gradient(180deg, #121c18 0%, #0f1714 100%);
+}
+
+.app-shell.dark .match-card {
+  background: #14201b;
+  border-color: #33453b;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.22);
+}
+
+.app-shell.dark .round-4 .match-card {
+  background: linear-gradient(180deg, #1c2018, #272313);
+}
+
+.app-shell.dark .round-4 .match-card:nth-of-type(2) {
+  background: linear-gradient(180deg, #201b16, #251b14);
 }
 
 .status-strip div {
@@ -1970,6 +2128,15 @@ h3 {
   .splash-panel,
   .guide-panel {
     flex-wrap: wrap;
+  }
+
+  .topbar-right {
+    justify-items: stretch;
+  }
+
+  .tournament-summary {
+    width: 100%;
+    min-width: 0;
   }
 
   .pick-console {
