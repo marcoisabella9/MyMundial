@@ -34,6 +34,26 @@ function summarizePrediction(prediction) {
   return prediction.advancingTeam ? `${score}, ${prediction.advancingTeam} advances` : score
 }
 
+const MATCH_DRAFT_POINTS = 160
+const AWARD_DRAFT_POINTS = {
+  potm: 160,
+  boot: 120,
+  glove: 80,
+  young: 80,
+}
+
+function draftPointsForPrediction(prediction) {
+  const isKnockoutTieWithoutAdvancer =
+    prediction.fixture_type === 'bracket'
+    && prediction.predicted_home_score === prediction.predicted_away_score
+    && !prediction.advancing_team
+  return isKnockoutTieWithoutAdvancer ? 0 : MATCH_DRAFT_POINTS
+}
+
+function draftPointsForAward(awardPick) {
+  return AWARD_DRAFT_POINTS[awardPick.award_key] ?? 0
+}
+
 function predictionRow({ profile, context, score, locked }) {
   const advancingTeam = score.advancerTeam
     ?? (score.homeScore > score.awayScore ? context.home : score.homeScore < score.awayScore ? context.away : null)
@@ -84,18 +104,20 @@ function awardPickFromRow(row) {
 function leagueFromRows(league, members = [], activity = [], predictions = [], awardPicks = []) {
   if (!league) return null
   const predictionStats = predictions.reduce((stats, prediction) => {
-    const current = stats[prediction.user_id] ?? { predictionCount: 0, lastSavedAt: null }
+    const current = stats[prediction.user_id] ?? { predictionCount: 0, lastSavedAt: null, points: 0 }
     stats[prediction.user_id] = {
       predictionCount: current.predictionCount + 1,
       lastSavedAt: [current.lastSavedAt, prediction.updated_at].filter(Boolean).sort().at(-1) ?? null,
+      points: current.points + draftPointsForPrediction(prediction),
     }
     return stats
   }, {})
   const awardStats = awardPicks.reduce((stats, awardPick) => {
-    const current = stats[awardPick.user_id] ?? { awardCount: 0, lastSavedAt: null }
+    const current = stats[awardPick.user_id] ?? { awardCount: 0, lastSavedAt: null, points: 0 }
     stats[awardPick.user_id] = {
       awardCount: current.awardCount + 1,
       lastSavedAt: [current.lastSavedAt, awardPick.updated_at].filter(Boolean).sort().at(-1) ?? null,
+      points: current.points + draftPointsForAward(awardPick),
     }
     return stats
   }, {})
@@ -108,7 +130,7 @@ function leagueFromRows(league, members = [], activity = [], predictions = [], a
       id: member.user_id,
       displayName: member.profiles?.display_name ?? 'Member',
       role: member.role,
-      points: 0,
+      points: (predictionStats[member.user_id]?.points ?? 0) + (awardStats[member.user_id]?.points ?? 0),
       predictionCount: predictionStats[member.user_id]?.predictionCount ?? 0,
       awardCount: awardStats[member.user_id]?.awardCount ?? 0,
       predictions: predictions

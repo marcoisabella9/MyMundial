@@ -1543,7 +1543,7 @@ function LeagueStandings({ league, rows, onViewPredictions }) {
           <p className="eyebrow">{league.name}</p>
           <h2>League standings</h2>
         </div>
-        <span className="pill">Invite-only</span>
+        <span className="pill">Draft standings</span>
       </div>
       {rows.length === 0 && (
         <div className="empty-state">Create a league or join one with an invite code.</div>
@@ -1560,7 +1560,7 @@ function LeagueStandings({ league, rows, onViewPredictions }) {
           </div>
           <div className="member-score">
             <strong>{member.points}</strong>
-            <span>pts</span>
+            <span>draft pts</span>
           </div>
           <button className="view-picks-button" onClick={() => onViewPredictions(member.id)}>
             <Eye size={15} /> View picks

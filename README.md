@@ -83,6 +83,8 @@ For a default 0-0 score, use `Confirm current pick` to mark that score as intent
 4. Friends can sign in, open the link, and join the league.
 5. League standings show members, saved-pick progress, points, activity, and a `View picks` action for each member.
 
+Until real match results are synced and settled, league points are draft totals based on saved picks and award selections.
+
 ## Current Production Notes
 
 - Frontend: React and Vite.
