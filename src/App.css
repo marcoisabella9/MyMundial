@@ -77,7 +77,6 @@ button {
 nav button,
 .top-actions button,
 .full-button,
-.save-pick,
 .match-meta button,
 .rank-actions button,
 .motm-row button,
@@ -419,10 +418,42 @@ h3 {
 
 .app-shell.dark .round-4 .match-card {
   background: linear-gradient(180deg, #1c2018, #272313);
+  border-color: #d7b94d;
+  box-shadow:
+    0 0 0 1px rgba(215, 185, 77, 0.58),
+    0 14px 34px rgba(167, 106, 0, 0.2);
 }
 
 .app-shell.dark .round-4 .match-card:nth-of-type(2) {
   background: linear-gradient(180deg, #201b16, #251b14);
+  border-color: #b78962;
+  box-shadow:
+    0 0 0 1px rgba(183, 137, 98, 0.5),
+    0 12px 28px rgba(128, 76, 35, 0.18);
+}
+
+.app-shell.dark .match-team strong,
+.app-shell.dark .match-team svg {
+  color: #f7fff9;
+}
+
+.app-shell.dark .match-state {
+  color: #a8bbb1;
+}
+
+.app-shell.dark .prediction-list h3,
+.app-shell.dark .prediction-list strong {
+  color: #f7fff9;
+}
+
+.app-shell.dark .prediction-list div {
+  background: #111c18;
+  border-color: #2e4037;
+}
+
+.app-shell.dark .prediction-list span,
+.app-shell.dark .prediction-list small {
+  color: #a8bbb1;
 }
 
 .status-strip div {
@@ -720,8 +751,10 @@ h3 {
   justify-self: center;
   min-height: 118px;
   border-color: #d7b94d;
+  box-shadow:
+    0 0 0 1px rgba(215, 185, 77, 0.5),
+    0 14px 34px rgba(167, 106, 0, 0.13);
   background: linear-gradient(180deg, #ffffff, #fffbea);
-  box-shadow: 0 14px 34px rgba(167, 106, 0, 0.13);
 }
 
 .round-4 .match-card:nth-of-type(2) {
@@ -1003,41 +1036,11 @@ h3 {
   box-shadow: 0 0 0 3px rgba(15, 143, 79, 0.1);
 }
 
-.save-pick {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 40px;
-  border: 1px solid #0f8f4f;
-  border-radius: 8px;
-  background: #eef9f2;
-  color: #0f8f4f;
-  cursor: pointer;
-  font-weight: 850;
-}
-
-.save-pick:disabled {
-  cursor: not-allowed;
-  opacity: 0.58;
-}
-
 .stepper button:disabled,
 .advancer-picker button:disabled,
 .award-search input:disabled {
   cursor: not-allowed;
   opacity: 0.5;
-}
-
-.save-pick.saving {
-  background: #0f8f4f;
-  color: white;
-  box-shadow: 0 0 0 4px rgba(15, 143, 79, 0.12);
-}
-
-.save-action-wrap {
-  display: grid;
-  gap: 8px;
 }
 
 .save-tooltip {
@@ -1066,21 +1069,6 @@ h3 {
 .save-message.error {
   background: #fdebea;
   color: #d94b3e;
-}
-
-.button-spinner {
-  width: 16px;
-  height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.45);
-  border-top-color: #ffffff;
-  border-radius: 50%;
-  animation: spin 0.7s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .points-stack {

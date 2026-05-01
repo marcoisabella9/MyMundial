@@ -768,36 +768,6 @@ function App() {
     })
   }
 
-  function confirmCurrentPick() {
-    if (isLockedAt(matchContext.lockAt)) {
-      setSaveStatus({ loading: false, message: '', error: 'This match is locked. Picks can no longer be changed.' })
-      return
-    }
-    const scoreToConfirm = {
-      ...activeScore,
-      home: matchContext.home,
-      away: matchContext.away,
-      touched: true,
-    }
-    if (matchContext.type === 'group') {
-      setGroupScores((current) => ({
-        ...current,
-        [matchContext.id]: scoreToConfirm,
-      }))
-    } else {
-      setBracketScores((current) => ({
-        ...current,
-        [matchContext.id]: scoreToConfirm,
-      }))
-    }
-    setDirtyPick({ context: matchContext, score: scoreToConfirm })
-    setSaveStatus({
-      loading: false,
-      message: isSignedIn ? 'Autosave queued.' : 'Sign in to autosave predictions.',
-      error: '',
-    })
-  }
-
   async function handleAuthSubmit(event) {
     event.preventDefault()
     if (!hasSupabaseConfig) {
@@ -934,14 +904,6 @@ function App() {
     } catch {
       setShareStatus(inviteUrl)
     }
-  }
-
-  function confirmDisplayedPick() {
-    if (matchContext.type === 'bracket' && activeScore.homeScore === activeScore.awayScore && !activeScore.advancerTeam) {
-      setSaveStatus({ loading: false, message: 'Choose who advances to autosave this knockout pick.', error: '' })
-      return
-    }
-    confirmCurrentPick()
   }
 
   async function saveAwardPick(award, recipient) {
@@ -1099,7 +1061,6 @@ function App() {
               onBack={() => setView(matchContext.backView)}
               onPreviousMatch={() => goToAdjacentMatch(-1)}
               onNextMatch={() => goToAdjacentMatch(1)}
-              onConfirmPick={confirmDisplayedPick}
               onPickAdvancer={pickAdvancer}
               pickComplete={pickComplete}
               isKnockoutTie={isKnockoutTie}
@@ -1302,7 +1263,6 @@ function MatchPanel({
   onBack,
   onPreviousMatch,
   onNextMatch,
-  onConfirmPick,
   onPickAdvancer,
   pickComplete,
   isKnockoutTie,
@@ -1360,20 +1320,9 @@ function MatchPanel({
           </div>
         </div>
       )}
-      <div className="save-action-wrap">
-        <button
-          className={`save-pick ${saveStatus.loading ? 'saving' : ''}`}
-          onClick={onConfirmPick}
-          disabled={isLocked || saveStatus.loading || (context.type === 'bracket' && !pickComplete)}
-          title={saveTooltip}
-        >
-          {saveStatus.loading ? <RefreshSpinner /> : <Save size={16} />}
-          {isLocked ? 'Match locked' : saveStatus.loading ? 'Autosaving...' : context.type === 'bracket' && !pickComplete ? 'Pick advancer first' : 'Confirm current pick'}
-        </button>
-        <div className="save-tooltip" title={saveTooltip}>
-          <Info size={15} />
-          <span>{saveTooltip}</span>
-        </div>
+      <div className="save-tooltip" title={saveTooltip}>
+        <Info size={15} />
+        <span>{saveTooltip}</span>
       </div>
       {(saveStatus.message || saveStatus.error) && (
         <p className={`save-message ${saveStatus.error ? 'error' : ''}`}>{saveStatus.error || saveStatus.message}</p>
@@ -1386,10 +1335,6 @@ function MatchPanel({
       </div>
     </aside>
   )
-}
-
-function RefreshSpinner() {
-  return <span className="button-spinner" aria-hidden="true" />
 }
 
 function MvpMatchRail({ context, score }) {
