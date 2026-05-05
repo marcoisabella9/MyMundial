@@ -101,6 +101,17 @@ function awardPickFromRow(row) {
   }
 }
 
+function activityFromRow(item) {
+  return {
+    id: item.id,
+    actorId: item.actor_id,
+    type: item.activity_type,
+    metadata: item.metadata ?? {},
+    text: activityText(item),
+    createdAt: item.created_at,
+  }
+}
+
 function leagueFromRows(league, members = [], activity = [], predictions = [], awardPicks = []) {
   if (!league) return null
   const rawActivityStats = activity.reduce((stats, item) => {
@@ -170,17 +181,16 @@ function leagueFromRows(league, members = [], activity = [], predictions = [], a
       awardPicks: awardPicks
         .filter((awardPick) => awardPick.user_id === member.user_id)
         .map(awardPickFromRow),
+      activity: activity
+        .filter((item) => item.actor_id === member.user_id)
+        .map(activityFromRow),
       lastSavedAt: [
         predictionStats[member.user_id]?.lastSavedAt,
         activityStats[member.user_id]?.lastSavedAt,
         awardStats[member.user_id]?.lastSavedAt,
       ].filter(Boolean).sort().at(-1) ?? null,
     })),
-    activity: activity.map((item) => ({
-      id: item.id,
-      text: activityText(item),
-      createdAt: item.created_at,
-    })),
+    activity: activity.map(activityFromRow),
   }
 }
 

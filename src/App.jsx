@@ -1130,6 +1130,7 @@ function App() {
             {selectedLeagueMember && (
               <MemberPredictionModal
                 member={selectedLeagueMember}
+                matchSequence={matchSequence}
                 onClose={() => setSelectedLeagueMemberId(null)}
               />
             )}
@@ -1226,6 +1227,36 @@ function bracketPredictionsByStage(predictions) {
       grouped[stage].push(prediction)
     })
   return order.map((stage) => [stage, grouped[stage]])
+}
+
+function predictionsFromActivity(member, matchSequence) {
+  const contextById = Object.fromEntries(matchSequence.map((context) => [context.id, context]))
+  const rowsByFixture = new Map()
+  const activities = member.activity ?? []
+  activities
+    .filter((activity) => activity.type === 'prediction_saved' && activity.metadata?.fixture_key)
+    .forEach((activity) => {
+      const context = contextById[activity.metadata.fixture_key]
+      const scoreMatch = String(activity.metadata.summary ?? '').match(/(\d+)-(\d+)/)
+      if (!context || !scoreMatch || rowsByFixture.has(context.id)) return
+      const advancerMatch = String(activity.metadata.summary ?? '').match(/,\s*(.+?)\s+advances\.?$/i)
+      rowsByFixture.set(context.id, {
+        id: `activity-${activity.id}`,
+        userId: member.id,
+        fixtureId: context.id,
+        fixtureType: context.type,
+        stage: context.stage,
+        homeTeam: context.home,
+        awayTeam: context.away,
+        predictedHomeScore: Number(scoreMatch[1]),
+        predictedAwayScore: Number(scoreMatch[2]),
+        advancingTeam: advancerMatch?.[1] ?? null,
+        updatedAt: activity.createdAt,
+        resultState: 'draft',
+        fromActivity: true,
+      })
+    })
+  return Array.from(rowsByFixture.values())
 }
 
 function GroupsView({ standings, openMatch, groupScores }) {
@@ -1670,8 +1701,12 @@ function LeagueActivity({ league }) {
   )
 }
 
-function MemberPredictionModal({ member, onClose }) {
-  const predictions = member.predictions ?? []
+function MemberPredictionModal({ member, matchSequence, onClose }) {
+  const directPredictions = member.predictions ?? []
+  const activityPredictions = predictionsFromActivity(member, matchSequence)
+  const predictionMap = new Map(activityPredictions.map((prediction) => [prediction.fixtureId, prediction]))
+  directPredictions.forEach((prediction) => predictionMap.set(prediction.fixtureId, prediction))
+  const predictions = Array.from(predictionMap.values())
   const awardRows = member.awardPicks ?? []
   const groupStandings = standingsForPredictions(predictions)
   const bracketStages = bracketPredictionsByStage(predictions)

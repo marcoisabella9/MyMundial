@@ -2090,9 +2090,10 @@ h3 {
 
 .mini-bracket-card {
   display: grid;
-  grid-template-columns: 24px 1fr auto 1fr 24px;
+  grid-template-columns: 24px minmax(18px, auto) auto minmax(18px, auto) 24px;
   align-items: center;
   gap: 5px;
+  justify-content: start;
   min-height: 32px;
   border: 1px solid #edf2ef;
   border-radius: 7px;
@@ -2243,7 +2244,7 @@ h3 {
   }
 
   .mini-bracket-grid {
-    grid-template-columns: repeat(3, minmax(110px, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -2338,9 +2339,46 @@ h3 {
   .recipient-list,
   .award-search-row,
   .mini-group-grid,
-  .mini-bracket-grid,
   .mini-awards-grid {
     grid-template-columns: 1fr;
+  }
+
+  .member-modal {
+    width: min(520px, calc(100vw - 24px));
+    max-height: calc(100svh - 28px);
+    padding: 16px;
+  }
+
+  .member-picks-overview {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .member-picks-overview div {
+    padding: 10px;
+  }
+
+  .member-picks-overview strong {
+    font-size: 20px;
+  }
+
+  .mini-bracket-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .mini-bracket-stage {
+    gap: 6px;
+  }
+
+  .mini-bracket-card {
+    grid-template-columns: 24px 28px 12px 28px 24px 1fr;
+    justify-content: start;
+    width: fit-content;
+    max-width: 100%;
+  }
+
+  .mini-bracket-card small {
+    grid-column: auto;
+    justify-self: start;
   }
 
   .bracket-scroll {
