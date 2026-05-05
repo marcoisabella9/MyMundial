@@ -4,6 +4,7 @@ import {
   CalendarClock,
   Check,
   ChevronRight,
+  ClipboardCheck,
   CircleHelp,
   CircleMinus,
   CirclePlus,
@@ -34,6 +35,8 @@ const navItems = [
   { id: 'leagues', label: 'Leagues', icon: Users },
   { id: 'awards', label: 'Awards', icon: Medal },
 ]
+
+const adminNavItem = { id: 'results', label: 'Results', icon: ClipboardCheck }
 
 const viewTitles = {
   groups: 'Group Stage',
@@ -363,6 +366,10 @@ function App() {
   const [bracketScores, setBracketScores] = useState({})
   const [selectedAward, setSelectedAward] = useState('potm')
   const [awardPicks, setAwardPicks] = useState({})
+  const [fixtureResults, setFixtureResults] = useState({})
+  const [awardResults, setAwardResults] = useState({})
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [resultStatus, setResultStatus] = useState({ loading: false, message: '', error: '' })
   const [matchContext, setMatchContext] = useState(defaultMatchContext)
   const [dirtyPick, setDirtyPick] = useState(null)
   const [theme, setTheme] = useState(initialTheme)
@@ -402,10 +409,12 @@ function App() {
       setAuthStatus({ loading: true, message: 'Syncing your MyMundial account...', error: '' })
       try {
         const nextProfile = await supabaseMvpStore.ensureProfile(currentUser, profile)
-        const [remotePredictions, remoteLeague, remoteAwardPicks] = await Promise.all([
+        const [remotePredictions, remoteLeague, remoteAwardPicks, remoteIsAdmin, remoteResults] = await Promise.all([
           supabaseMvpStore.loadPredictions(currentUser),
           supabaseMvpStore.loadLeague(currentUser),
           supabaseMvpStore.loadAwardPicks(currentUser),
+          supabaseMvpStore.loadAdminStatus(currentUser),
+          supabaseMvpStore.loadResults(),
         ])
         if (!isMounted) return
         setProfile(nextProfile)
@@ -431,6 +440,9 @@ function App() {
         setPredictionCount(remotePredictions.length)
         setLastSavedAt(latestPredictionTime(remotePredictions))
         setAwardPicks(remoteAwardPicks)
+        setIsAdmin(remoteIsAdmin)
+        setFixtureResults(remoteResults.fixtures)
+        setAwardResults(remoteResults.awards)
         setAuthStatus({
           loading: false,
           message: remotePredictions.length > 0 ? 'Synced saved picks from Supabase.' : 'Signed in. Picks will autosave.',
@@ -819,6 +831,9 @@ function App() {
       setGroupScores(freshGroupScores())
       setBracketScores({})
       setAwardPicks({})
+      setFixtureResults({})
+      setAwardResults({})
+      setIsAdmin(false)
       setPredictionCount(0)
       setLastSavedAt(null)
       setDirtyPick(null)
@@ -942,6 +957,52 @@ function App() {
     }
   }
 
+  async function saveFixtureResult(context, result) {
+    if (!isSignedIn || !isAdmin) {
+      setResultStatus({ loading: false, message: '', error: 'Admin access is required to enter official results.' })
+      return
+    }
+    setResultStatus({ loading: true, message: `Saving ${context.home} vs ${context.away}...`, error: '' })
+    try {
+      const savedResult = await supabaseMvpStore.saveFixtureResult({ context, result })
+      const [remoteResults, remoteLeague] = await Promise.all([
+        supabaseMvpStore.loadResults(),
+        supabaseMvpStore.loadLeague(currentUser),
+      ])
+      setFixtureResults(remoteResults.fixtures)
+      setAwardResults(remoteResults.awards)
+      if (remoteLeague) setLeague(remoteLeague)
+      setResultStatus({
+        loading: false,
+        message: `${savedResult.homeTeam} ${savedResult.homeScore}-${savedResult.awayScore} ${savedResult.awayTeam} settled.`,
+        error: '',
+      })
+    } catch (error) {
+      setResultStatus({ loading: false, message: '', error: error.message })
+    }
+  }
+
+  async function saveAwardResult(award, recipient) {
+    if (!isSignedIn || !isAdmin) {
+      setResultStatus({ loading: false, message: '', error: 'Admin access is required to enter award results.' })
+      return
+    }
+    setResultStatus({ loading: true, message: `Saving ${award.label} result...`, error: '' })
+    try {
+      const savedAward = await supabaseMvpStore.saveAwardResult({ award, recipient })
+      const [remoteResults, remoteLeague] = await Promise.all([
+        supabaseMvpStore.loadResults(),
+        supabaseMvpStore.loadLeague(currentUser),
+      ])
+      setFixtureResults(remoteResults.fixtures)
+      setAwardResults(remoteResults.awards)
+      if (remoteLeague) setLeague(remoteLeague)
+      setResultStatus({ loading: false, message: `${savedAward.awardLabel} settled as ${savedAward.recipient}.`, error: '' })
+    } catch (error) {
+      setResultStatus({ loading: false, message: '', error: error.message })
+    }
+  }
+
   return (
     <main className={`app-shell ${isDark ? 'dark' : ''}`}>
       <aside className="sidebar">
@@ -953,7 +1014,7 @@ function App() {
           </div>
         </div>
         <nav>
-          {navItems.map((item) => {
+          {[...navItems, ...(isAdmin ? [adminNavItem] : [])].map((item) => {
             const Icon = item.icon
             return (
               <button className={view === item.id ? 'active' : ''} key={item.id} onClick={() => {
@@ -1147,6 +1208,17 @@ function App() {
             isSignedIn={isSignedIn}
             isLocked={awardsLocked}
             lockLabel={lockText(AWARD_LOCK_AT)}
+          />
+        )}
+
+        {view === 'results' && isAdmin && (
+          <ResultsView
+            matchSequence={matchSequence}
+            fixtureResults={fixtureResults}
+            awardResults={awardResults}
+            onSaveFixtureResult={saveFixtureResult}
+            onSaveAwardResult={saveAwardResult}
+            resultStatus={resultStatus}
           />
         )}
       </section>
@@ -1458,6 +1530,202 @@ function ScoreLine({ label, value, state }) {
   )
 }
 
+function ResultsView({
+  matchSequence,
+  fixtureResults,
+  awardResults,
+  onSaveFixtureResult,
+  onSaveAwardResult,
+  resultStatus,
+}) {
+  const [selectedFixtureId, setSelectedFixtureId] = useState(matchSequence[0]?.id ?? '')
+  const selectedContext = matchSequence.find((match) => match.id === selectedFixtureId) ?? matchSequence[0]
+  const selectedResult = selectedContext ? fixtureResults[selectedContext.id] : null
+  const settledFixtureCount = Object.keys(fixtureResults).length
+  const settledAwardCount = Object.keys(awardResults).length
+
+  return (
+    <section className="results-page">
+      <div className="panel wide results-admin">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Admin settlement</p>
+            <h2>Manual results fallback</h2>
+          </div>
+          <span className="pill">{settledFixtureCount} matches settled</span>
+        </div>
+        <div className="settlement-note">
+          <strong>API-ready path</strong>
+          <span>Manual results write to the same tables API-FOOTBALL sync can update later. League standings switch from draft points to settled points as results are saved.</span>
+        </div>
+        <div className="results-layout">
+          <div className="fixture-picker">
+            <div className="section-mini-head">
+              <h3>Fixtures</h3>
+              <span>{matchSequence.length} available</span>
+            </div>
+            <div className="fixture-list">
+              {matchSequence.map((match) => {
+                const result = fixtureResults[match.id]
+                return (
+                  <button
+                    className={selectedFixtureId === match.id ? 'selected' : ''}
+                    key={match.id}
+                    onClick={() => setSelectedFixtureId(match.id)}
+                  >
+                    <small>{match.stage}</small>
+                    <span><TeamFlag team={match.home} /> {meta(match.home).code}</span>
+                    <strong>{result ? `${result.homeScore}-${result.awayScore}` : 'unset'}</strong>
+                    <span><TeamFlag team={match.away} /> {meta(match.away).code}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+          {selectedContext && (
+            <FixtureResultEditor
+              key={`${selectedContext.id}-${selectedResult?.updatedAt ?? 'new'}`}
+              context={selectedContext}
+              existingResult={selectedResult}
+              resultStatus={resultStatus}
+              onSaveFixtureResult={onSaveFixtureResult}
+            />
+          )}
+        </div>
+      </div>
+
+      <div className="panel wide results-admin">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Tournament awards</p>
+            <h2>Manual award settlement</h2>
+          </div>
+          <span className="pill">{settledAwardCount}/{awards.length} settled</span>
+        </div>
+        <div className="award-result-grid">
+          {awards.map((award) => (
+            <AwardResultCard
+              award={award}
+              existingResult={awardResults[award.id]}
+              key={`${award.id}-${awardResults[award.id]?.updatedAt ?? 'new'}`}
+              resultStatus={resultStatus}
+              onSaveAwardResult={onSaveAwardResult}
+            />
+          ))}
+        </div>
+        {(resultStatus.message || resultStatus.error) && (
+          <p className={`auth-message ${resultStatus.error ? 'error' : ''}`}>
+            {resultStatus.error || resultStatus.message}
+          </p>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function FixtureResultEditor({ context, existingResult, resultStatus, onSaveFixtureResult }) {
+  const [fixtureDraft, setFixtureDraft] = useState({
+    homeScore: existingResult?.homeScore ?? 0,
+    awayScore: existingResult?.awayScore ?? 0,
+    advancerTeam: existingResult?.advancingTeam ?? '',
+  })
+  const needsAdvancer = context.type === 'bracket'
+    && fixtureDraft.homeScore === fixtureDraft.awayScore
+    && !fixtureDraft.advancerTeam
+
+  function updateFixtureDraft(team, delta) {
+    const key = team === context.home ? 'homeScore' : 'awayScore'
+    setFixtureDraft((current) => {
+      const next = { ...current, [key]: Math.max(0, current[key] + delta) }
+      if (next.homeScore !== next.awayScore) next.advancerTeam = ''
+      return next
+    })
+  }
+
+  return (
+    <div className="result-editor">
+      <div className="section-mini-head">
+        <h3>{context.stage}</h3>
+        <span>{existingResult ? `Last saved ${new Date(existingResult.updatedAt).toLocaleString()}` : 'No final result yet'}</span>
+      </div>
+      <div className="score-hero result-hero">
+        <TeamBadge team={context.home} />
+        <div className="score-center">
+          <span className="pill live">Final score</span>
+          <strong>{fixtureDraft.homeScore} - {fixtureDraft.awayScore}</strong>
+          <small>{context.venue}</small>
+        </div>
+        <TeamBadge team={context.away} />
+      </div>
+      <div className="score-controls">
+        {[context.home, context.away].map((team) => (
+          <div className="stepper" key={team}>
+            <span>{team}</span>
+            <button onClick={() => updateFixtureDraft(team, -1)}><CircleMinus size={18} /></button>
+            <strong>{team === context.home ? fixtureDraft.homeScore : fixtureDraft.awayScore}</strong>
+            <button onClick={() => updateFixtureDraft(team, 1)}><CirclePlus size={18} /></button>
+          </div>
+        ))}
+      </div>
+      {context.type === 'bracket' && fixtureDraft.homeScore === fixtureDraft.awayScore && (
+        <div className="advancer-picker">
+          <div>
+            <strong>Who advanced?</strong>
+            <span>Required for tied knockout results after extra time or penalties.</span>
+          </div>
+          <div>
+            {[context.home, context.away].map((team) => (
+              <button
+                className={fixtureDraft.advancerTeam === team ? 'selected' : ''}
+                key={team}
+                onClick={() => setFixtureDraft((current) => ({ ...current, advancerTeam: team }))}
+              >
+                <TeamBadge team={team} />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      <button
+        className="full-button"
+        disabled={resultStatus.loading || needsAdvancer}
+        onClick={() => onSaveFixtureResult(context, fixtureDraft)}
+      >
+        <ClipboardCheck size={16} /> Save final result
+      </button>
+      {needsAdvancer && <p className="auth-message error">Choose who advanced before settling this knockout match.</p>}
+    </div>
+  )
+}
+
+function AwardResultCard({ award, existingResult, resultStatus, onSaveAwardResult }) {
+  const [recipient, setRecipient] = useState(existingResult?.recipient ?? '')
+  return (
+    <article className="award-result-card">
+      <strong>{award.label}</strong>
+      <span>{award.points} pts</span>
+      <input
+        value={recipient}
+        list={`award-result-${award.id}`}
+        placeholder="Official recipient"
+        onChange={(event) => setRecipient(event.target.value)}
+      />
+      <datalist id={`award-result-${award.id}`}>
+        {awardCandidateCatalog
+          .filter((candidate) => candidate.tags.includes(award.id))
+          .map((candidate) => <option value={candidate.name} key={candidate.name} />)}
+      </datalist>
+      <button
+        className="full-button secondary"
+        disabled={resultStatus.loading || !recipient.trim()}
+        onClick={() => onSaveAwardResult(award, recipient.trim())}
+      >
+        Save award
+      </button>
+    </article>
+  )
+}
+
 function AccountPanel({
   profile,
   draft,
@@ -1647,6 +1915,7 @@ function LeagueManager({
 }
 
 function LeagueStandings({ league, rows, onViewPredictions }) {
+  const isSettled = league.scoringMode === 'settled'
   return (
     <div className="panel league-standings">
       <div className="panel-head">
@@ -1654,7 +1923,7 @@ function LeagueStandings({ league, rows, onViewPredictions }) {
           <p className="eyebrow">{league.name}</p>
           <h2>League standings</h2>
         </div>
-        <span className="pill">Draft standings</span>
+        <span className="pill">{isSettled ? 'Settled standings' : 'Draft standings'}</span>
       </div>
       {rows.length === 0 && (
         <div className="empty-state">Create a league or join one with an invite code.</div>
@@ -1671,7 +1940,7 @@ function LeagueStandings({ league, rows, onViewPredictions }) {
           </div>
           <div className="member-score">
             <strong>{member.points}</strong>
-            <span>draft pts</span>
+            <span>{isSettled ? 'pts' : 'draft pts'}</span>
           </div>
           <button className="view-picks-button" onClick={() => onViewPredictions(member.id)}>
             <Eye size={15} /> View picks

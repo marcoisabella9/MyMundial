@@ -2179,6 +2179,7 @@ h3 {
 }
 
 .award-grid,
+.award-result-grid,
 .api-map {
   display: grid;
   grid-template-columns: repeat(4, minmax(160px, 1fr));
@@ -2198,6 +2199,139 @@ h3 {
 .note-list p,
 .check-list span {
   color: #647067;
+}
+
+.results-page {
+  display: grid;
+  gap: 16px;
+}
+
+.results-admin {
+  display: grid;
+  gap: 14px;
+}
+
+.settlement-note {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #dce6df;
+  border-radius: 8px;
+  background: #f5f8f6;
+  padding: 12px 14px;
+}
+
+.settlement-note span {
+  color: #647067;
+}
+
+.results-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(360px, 1.2fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.fixture-picker,
+.result-editor {
+  display: grid;
+  gap: 12px;
+}
+
+.fixture-list {
+  display: grid;
+  gap: 8px;
+  max-height: 560px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.fixture-list button {
+  display: grid;
+  grid-template-columns: 70px 1fr 48px 1fr;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #dce6df;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 9px 10px;
+  color: #17211b;
+  cursor: pointer;
+}
+
+.fixture-list button.selected {
+  border-color: #0f8f4f;
+  box-shadow: 0 0 0 2px rgba(15, 143, 79, 0.12);
+}
+
+.fixture-list small {
+  color: #647067;
+  font-weight: 850;
+}
+
+.fixture-list span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fixture-list strong {
+  text-align: center;
+}
+
+.result-hero {
+  margin: 0;
+}
+
+.award-result-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.award-result-card {
+  display: grid;
+  gap: 9px;
+  border: 1px solid #dce6df;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.award-result-card span {
+  color: #647067;
+  font-size: 13px;
+}
+
+.award-result-card input {
+  width: 100%;
+  border: 1px solid #dce6df;
+  border-radius: 8px;
+  padding: 10px;
+  color: #17211b;
+}
+
+.app-shell.dark .settlement-note,
+.app-shell.dark .fixture-list button,
+.app-shell.dark .award-result-card {
+  background: rgba(20, 30, 26, 0.92);
+  border-color: #33453b;
+}
+
+.app-shell.dark .settlement-note span,
+.app-shell.dark .fixture-list small,
+.app-shell.dark .award-result-card span {
+  color: #a8bbb1;
+}
+
+.app-shell.dark .fixture-list button,
+.app-shell.dark .fixture-list strong,
+.app-shell.dark .award-result-card strong {
+  color: #f7fff9;
+}
+
+.app-shell.dark .award-result-card input {
+  background: #0c1712;
+  border-color: #33453b;
+  color: #f7fff9;
 }
 
 .note-list {
@@ -2248,6 +2382,7 @@ h3 {
   .player-grid,
   .mvp-grid,
   .award-grid,
+  .award-result-grid,
   .api-map,
   .recipient-list,
   .mini-group-grid,
@@ -2279,7 +2414,7 @@ h3 {
   }
 
   nav {
-    grid-template-columns: repeat(6, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(48px, 1fr));
   }
 
   nav button {
@@ -2297,6 +2432,7 @@ h3 {
   .match-page,
   .lineup-board,
   .leagues-page,
+  .results-layout,
   .readiness-grid,
   .provider-grid {
     grid-template-columns: 1fr;
@@ -2347,6 +2483,7 @@ h3 {
   .player-grid,
   .mvp-grid,
   .award-grid,
+  .award-result-grid,
   .api-map,
   .recipient-list,
   .award-search-row,

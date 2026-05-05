@@ -42,6 +42,12 @@ const AWARD_DRAFT_POINTS = {
   young: 80,
 }
 
+const RESULT_POINTS = {
+  outcome: 100,
+  exact: 40,
+  goalDifference: 20,
+}
+
 function draftPointsForPrediction(prediction) {
   const isKnockoutTieWithoutAdvancer =
     prediction.fixture_type === 'bracket'
@@ -101,6 +107,34 @@ function awardPickFromRow(row) {
   }
 }
 
+function fixtureResultFromRow(row) {
+  return {
+    fixtureKey: row.fixture_key,
+    fixtureType: row.fixture_type,
+    stage: row.stage,
+    homeTeam: row.home_team,
+    awayTeam: row.away_team,
+    homeScore: row.home_score,
+    awayScore: row.away_score,
+    advancingTeam: row.advancing_team,
+    status: row.status,
+    source: row.source,
+    settledAt: row.settled_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function awardResultFromRow(row) {
+  return {
+    awardKey: row.award_key,
+    awardLabel: row.award_label,
+    recipient: row.recipient,
+    source: row.source,
+    settledAt: row.settled_at,
+    updatedAt: row.updated_at,
+  }
+}
+
 function activityFromRow(item) {
   return {
     id: item.id,
@@ -112,8 +146,68 @@ function activityFromRow(item) {
   }
 }
 
-function leagueFromRows(league, members = [], activity = [], predictions = [], awardPicks = []) {
+function normalizeText(value) {
+  return String(value ?? '').trim().toLowerCase()
+}
+
+function isMissingResultTableError(error) {
+  const message = String(error?.message ?? '')
+  return ['42P01', 'PGRST205'].includes(error?.code)
+    || message.includes('mvp_fixture_results')
+    || message.includes('mvp_award_results')
+}
+
+function outcomeFor(homeScore, awayScore, homeTeam, awayTeam, advancingTeam, fixtureType) {
+  if (fixtureType === 'bracket' && homeScore === awayScore) return advancingTeam ?? null
+  if (homeScore === awayScore) return 'draw'
+  return homeScore > awayScore ? homeTeam : awayTeam
+}
+
+function settlementForPrediction(prediction, result) {
+  if (!result) return { points: draftPointsForPrediction(prediction), mode: 'draft' }
+  const predictionOutcome = outcomeFor(
+    prediction.predicted_home_score,
+    prediction.predicted_away_score,
+    prediction.home_team,
+    prediction.away_team,
+    prediction.advancing_team,
+    prediction.fixture_type,
+  )
+  const resultOutcome = outcomeFor(
+    result.home_score,
+    result.away_score,
+    result.home_team,
+    result.away_team,
+    result.advancing_team,
+    result.fixture_type,
+  )
+  const outcomeCorrect = predictionOutcome && resultOutcome && predictionOutcome === resultOutcome
+  const exactCorrect = prediction.predicted_home_score === result.home_score
+    && prediction.predicted_away_score === result.away_score
+  const goalDifferenceCorrect =
+    prediction.predicted_home_score - prediction.predicted_away_score === result.home_score - result.away_score
+  const points =
+    (outcomeCorrect ? RESULT_POINTS.outcome : 0)
+    + (exactCorrect ? RESULT_POINTS.exact : 0)
+    + (goalDifferenceCorrect ? RESULT_POINTS.goalDifference : 0)
+  return {
+    points,
+    mode: 'settled',
+    breakdown: { outcomeCorrect, exactCorrect, goalDifferenceCorrect },
+  }
+}
+
+function settlementForAward(awardPick, result) {
+  if (!result) return { points: draftPointsForAward(awardPick), mode: 'draft' }
+  const correct = normalizeText(awardPick.recipient) === normalizeText(result.recipient)
+  return { points: correct ? draftPointsForAward(awardPick) : 0, mode: 'settled', breakdown: { correct } }
+}
+
+function leagueFromRows(league, members = [], activity = [], predictions = [], awardPicks = [], fixtureResults = [], awardResults = []) {
   if (!league) return null
+  const fixtureResultByKey = Object.fromEntries(fixtureResults.map((result) => [result.fixture_key, result]))
+  const awardResultByKey = Object.fromEntries(awardResults.map((result) => [result.award_key, result]))
+  const hasSettledResults = fixtureResults.length > 0 || awardResults.length > 0
   const rawActivityStats = activity.reduce((stats, item) => {
     if (item.activity_type !== 'prediction_saved' || !item.actor_id) return stats
     const summary = String(item.metadata?.summary ?? '')
@@ -146,20 +240,24 @@ function leagueFromRows(league, members = [], activity = [], predictions = [], a
     }),
   )
   const predictionStats = predictions.reduce((stats, prediction) => {
-    const current = stats[prediction.user_id] ?? { predictionCount: 0, lastSavedAt: null, points: 0 }
+    const current = stats[prediction.user_id] ?? { predictionCount: 0, settledCount: 0, lastSavedAt: null, points: 0 }
+    const settlement = settlementForPrediction(prediction, fixtureResultByKey[prediction.fixture_key])
     stats[prediction.user_id] = {
       predictionCount: current.predictionCount + 1,
+      settledCount: current.settledCount + (settlement.mode === 'settled' ? 1 : 0),
       lastSavedAt: [current.lastSavedAt, prediction.updated_at].filter(Boolean).sort().at(-1) ?? null,
-      points: current.points + draftPointsForPrediction(prediction),
+      points: current.points + settlement.points,
     }
     return stats
   }, {})
   const awardStats = awardPicks.reduce((stats, awardPick) => {
-    const current = stats[awardPick.user_id] ?? { awardCount: 0, lastSavedAt: null, points: 0 }
+    const current = stats[awardPick.user_id] ?? { awardCount: 0, settledCount: 0, lastSavedAt: null, points: 0 }
+    const settlement = settlementForAward(awardPick, awardResultByKey[awardPick.award_key])
     stats[awardPick.user_id] = {
       awardCount: current.awardCount + 1,
+      settledCount: current.settledCount + (settlement.mode === 'settled' ? 1 : 0),
       lastSavedAt: [current.lastSavedAt, awardPick.updated_at].filter(Boolean).sort().at(-1) ?? null,
-      points: current.points + draftPointsForAward(awardPick),
+      points: current.points + settlement.points,
     }
     return stats
   }, {})
@@ -168,13 +266,18 @@ function leagueFromRows(league, members = [], activity = [], predictions = [], a
     name: league.name,
     inviteCode: league.invite_code,
     createdAt: league.created_at,
+    scoringMode: hasSettledResults ? 'settled' : 'draft',
+    settledFixtureCount: fixtureResults.length,
+    settledAwardCount: awardResults.length,
     members: members.map((member) => ({
       id: member.user_id,
       displayName: member.profiles?.display_name ?? 'Member',
       role: member.role,
       points: (predictionStats[member.user_id]?.points ?? activityStats[member.user_id]?.points ?? 0) + (awardStats[member.user_id]?.points ?? 0),
       predictionCount: predictionStats[member.user_id]?.predictionCount ?? activityStats[member.user_id]?.predictionCount ?? 0,
+      settledPredictionCount: predictionStats[member.user_id]?.settledCount ?? 0,
       awardCount: awardStats[member.user_id]?.awardCount ?? 0,
+      settledAwardCount: awardStats[member.user_id]?.settledCount ?? 0,
       predictions: predictions
         .filter((prediction) => prediction.user_id === member.user_id)
         .map(predictionFromRow),
@@ -330,6 +433,8 @@ export const supabaseMvpStore = {
     const memberIds = members.map((member) => member.user_id)
     let predictions = []
     let awardPicks = []
+    let fixtureResults = []
+    let awardResults = []
     if (memberIds.length) {
       const { data: predictionRows, error: predictionError } = await client
         .from('mvp_prediction_drafts')
@@ -346,7 +451,93 @@ export const supabaseMvpStore = {
       if (!awardError) awardPicks = awardRows
     }
 
-    return leagueFromRows(league, members, activity, predictions, awardPicks)
+    const { data: fixtureResultRows, error: fixtureResultError } = await client
+      .from('mvp_fixture_results')
+      .select('*')
+    if (!fixtureResultError) fixtureResults = fixtureResultRows
+
+    const { data: awardResultRows, error: awardResultError } = await client
+      .from('mvp_award_results')
+      .select('*')
+    if (!awardResultError) awardResults = awardResultRows
+
+    return leagueFromRows(league, members, activity, predictions, awardPicks, fixtureResults, awardResults)
+  },
+
+  async loadAdminStatus(user) {
+    const client = await requireClient()
+    const { data, error } = await client
+      .from('app_admins')
+      .select('user_id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+    if (error) return false
+    return Boolean(data)
+  },
+
+  async loadResults() {
+    const client = await requireClient()
+    const [{ data: fixtureRows, error: fixtureError }, { data: awardRows, error: awardError }] = await Promise.all([
+      client.from('mvp_fixture_results').select('*').order('updated_at', { ascending: false }),
+      client.from('mvp_award_results').select('*').order('updated_at', { ascending: false }),
+    ])
+    if (isMissingResultTableError(fixtureError) || isMissingResultTableError(awardError)) {
+      return { fixtures: {}, awards: {} }
+    }
+    if (fixtureError) throw fixtureError
+    if (awardError) throw awardError
+    return {
+      fixtures: Object.fromEntries(fixtureRows.map((row) => [row.fixture_key, fixtureResultFromRow(row)])),
+      awards: Object.fromEntries(awardRows.map((row) => [row.award_key, awardResultFromRow(row)])),
+    }
+  },
+
+  async saveFixtureResult({ context, result }) {
+    const client = await requireClient()
+    const { data, error } = await client
+      .from('mvp_fixture_results')
+      .upsert({
+        fixture_key: context.id,
+        fixture_type: context.type,
+        stage: context.stage,
+        home_team: context.home,
+        away_team: context.away,
+        home_score: result.homeScore,
+        away_score: result.awayScore,
+        advancing_team: result.advancerTeam ?? (
+          context.type === 'bracket'
+            ? result.homeScore > result.awayScore
+              ? context.home
+              : result.homeScore < result.awayScore
+                ? context.away
+                : null
+            : null
+        ),
+        status: 'final',
+        source: 'manual',
+        settled_at: new Date().toISOString(),
+      }, { onConflict: 'fixture_key' })
+      .select()
+      .single()
+    if (error) throw error
+    return fixtureResultFromRow(data)
+  },
+
+  async saveAwardResult({ award, recipient }) {
+    const client = await requireClient()
+    const { data, error } = await client
+      .from('mvp_award_results')
+      .upsert({
+        award_key: award.id,
+        award_label: award.label,
+        recipient,
+        source: 'manual',
+        settled_at: new Date().toISOString(),
+      }, { onConflict: 'award_key' })
+      .select()
+      .single()
+    if (error) throw error
+    return awardResultFromRow(data)
   },
 
   async createLeague(name, profile, user) {
