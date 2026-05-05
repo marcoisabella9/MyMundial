@@ -49,8 +49,8 @@ function initialView() {
 }
 
 function initialTheme() {
-  if (typeof window === 'undefined') return 'light'
-  return window.localStorage.getItem('mymundial-theme') ?? 'light'
+  if (typeof window === 'undefined') return 'dark'
+  return window.localStorage.getItem('mymundial-theme') ?? 'dark'
 }
 
 function initialInviteCode() {
@@ -285,6 +285,19 @@ function TeamBadge({ team, seed }) {
       <span className="team-name">{team}</span>
       {seed && <span className="seed">{seed}</span>}
     </span>
+  )
+}
+
+function TeamFlag({ team }) {
+  const item = meta(team)
+  return (
+    <img
+      className="team-flag compact-flag"
+      src={`https://flagcdn.com/w40/${flagCodes[team] ?? 'un'}.png`}
+      alt={item.code}
+      title={`${item.code} ${team}`}
+      style={{ '--flag-color': item.color }}
+    />
   )
 }
 
@@ -1182,6 +1195,39 @@ function bracketPickLabel(match, score) {
   return 'Picked'
 }
 
+function scoreKey(prediction) {
+  return `${prediction.homeTeam} ${prediction.predictedHomeScore}-${prediction.predictedAwayScore} ${prediction.awayTeam}`
+}
+
+function standingsForPredictions(predictions) {
+  const scores = freshGroupScores()
+  predictions
+    .filter((prediction) => prediction.fixtureType === 'group' && scores[prediction.fixtureId])
+    .forEach((prediction) => {
+      scores[prediction.fixtureId] = {
+        ...scores[prediction.fixtureId],
+        home: prediction.homeTeam,
+        away: prediction.awayTeam,
+        homeScore: prediction.predictedHomeScore,
+        awayScore: prediction.predictedAwayScore,
+        touched: true,
+      }
+    })
+  return buildStandings(scores)
+}
+
+function bracketPredictionsByStage(predictions) {
+  const order = ['R32', 'R16', 'QF', 'SF', 'Final', '3rd Place']
+  const grouped = Object.fromEntries(order.map((stage) => [stage, []]))
+  predictions
+    .filter((prediction) => prediction.fixtureType === 'bracket')
+    .forEach((prediction) => {
+      const stage = order.includes(prediction.stage) ? prediction.stage : prediction.stage === 'Finals' ? 'Final' : 'R32'
+      grouped[stage].push(prediction)
+    })
+  return order.map((stage) => [stage, grouped[stage]])
+}
+
 function GroupsView({ standings, openMatch, groupScores }) {
   return (
     <section className="groups-page">
@@ -1627,6 +1673,10 @@ function LeagueActivity({ league }) {
 function MemberPredictionModal({ member, onClose }) {
   const predictions = member.predictions ?? []
   const awardRows = member.awardPicks ?? []
+  const groupStandings = standingsForPredictions(predictions)
+  const bracketStages = bracketPredictionsByStage(predictions)
+  const hasGroupPredictions = predictions.some((prediction) => prediction.fixtureType === 'group')
+  const hasBracketPredictions = predictions.some((prediction) => prediction.fixtureType === 'bracket')
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true">
       <div className="panel member-modal">
@@ -1637,24 +1687,88 @@ function MemberPredictionModal({ member, onClose }) {
           </div>
           <button className="secondary" onClick={onClose}>Close</button>
         </div>
-        <div className="prediction-list">
-          <h3>Match predictions</h3>
-          {predictions.length === 0 && <p className="empty-state">No match predictions saved yet.</p>}
-          {predictions.map((prediction) => (
-            <div key={prediction.id}>
-              <strong>{prediction.stage}</strong>
-              <span>{prediction.homeTeam} {prediction.predictedHomeScore}-{prediction.predictedAwayScore} {prediction.awayTeam}</span>
-              {prediction.advancingTeam && <small>{prediction.advancingTeam} advances</small>}
+        <div className="member-picks-overview">
+          <div>
+            <strong>{member.predictionCount ?? 0}</strong>
+            <span>match picks</span>
+          </div>
+          <div>
+            <strong>{member.awardCount ?? 0}</strong>
+            <span>award picks</span>
+          </div>
+          <div>
+            <strong>{member.points ?? 0}</strong>
+            <span>draft pts</span>
+          </div>
+        </div>
+        <div className="member-pick-sections">
+          <section>
+            <div className="section-mini-head">
+              <h3>Group tables</h3>
+              <span>{hasGroupPredictions ? 'Projected from saved scores' : 'No saved group picks'}</span>
             </div>
-          ))}
-          <h3>Awards</h3>
-          {awardRows.length === 0 && <p className="empty-state">No award picks saved yet.</p>}
-          {awardRows.map((awardPick) => (
-            <div key={awardPick.awardKey}>
-              <strong>{awardPick.awardLabel}</strong>
-              <span>{awardPick.recipient}</span>
+            {!hasGroupPredictions && <p className="empty-state">No group-stage predictions saved yet.</p>}
+            {hasGroupPredictions && (
+              <div className="mini-group-grid">
+                {groups.map((group) => (
+                  <article className="mini-group-card" key={group.id}>
+                    <strong>Group {group.id}</strong>
+                    {groupStandings[group.id].map((row, index) => (
+                      <div className="mini-rank-row" key={row.team}>
+                        <span>{index + 1}</span>
+                        <TeamFlag team={row.team} />
+                        <b>{row.pts}</b>
+                      </div>
+                    ))}
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+          <section>
+            <div className="section-mini-head">
+              <h3>Knockout bracket</h3>
+              <span>{hasBracketPredictions ? 'Flag view' : 'No saved knockout picks'}</span>
             </div>
-          ))}
+            {!hasBracketPredictions && <p className="empty-state">No knockout predictions saved yet.</p>}
+            {hasBracketPredictions && (
+              <div className="mini-bracket-grid">
+                {bracketStages.map(([stage, stagePredictions]) => (
+                  <div className="mini-bracket-stage" key={stage}>
+                    <strong>{stage}</strong>
+                    {stagePredictions.length === 0 && <span className="mini-empty">TBD</span>}
+                    {stagePredictions.map((prediction) => (
+                      <div className="mini-bracket-card" key={prediction.id} title={scoreKey(prediction)}>
+                        <TeamFlag team={prediction.homeTeam} />
+                        <b>{prediction.predictedHomeScore}</b>
+                        <span>-</span>
+                        <b>{prediction.predictedAwayScore}</b>
+                        <TeamFlag team={prediction.awayTeam} />
+                        {prediction.advancingTeam && <small>{meta(prediction.advancingTeam).code}</small>}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+          <section>
+            <div className="section-mini-head">
+              <h3>Awards</h3>
+              <span>{awardRows.length ? `${awardRows.length}/${awards.length} picked` : 'No saved awards'}</span>
+            </div>
+            {awardRows.length === 0 && <p className="empty-state">No award picks saved yet.</p>}
+            {awardRows.length > 0 && (
+              <div className="mini-awards-grid">
+                {awardRows.map((awardPick) => (
+                  <div key={awardPick.awardKey}>
+                    <strong>{awardPick.awardLabel}</strong>
+                    <span>{awardPick.recipient}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
         </div>
       </div>
     </div>

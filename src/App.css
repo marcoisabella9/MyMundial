@@ -456,6 +456,40 @@ h3 {
   color: #a8bbb1;
 }
 
+.app-shell.dark .member-picks-overview {
+  border-color: #33453b;
+  background: #33453b;
+}
+
+.app-shell.dark .member-picks-overview div,
+.app-shell.dark .mini-group-card,
+.app-shell.dark .mini-bracket-stage,
+.app-shell.dark .mini-awards-grid div {
+  background: #111c18;
+  border-color: #2e4037;
+}
+
+.app-shell.dark .member-picks-overview span,
+.app-shell.dark .section-mini-head span,
+.app-shell.dark .mini-empty,
+.app-shell.dark .mini-awards-grid span {
+  color: #a8bbb1;
+}
+
+.app-shell.dark .member-picks-overview strong,
+.app-shell.dark .mini-group-card strong,
+.app-shell.dark .mini-bracket-stage strong,
+.app-shell.dark .mini-rank-row b,
+.app-shell.dark .mini-bracket-card b,
+.app-shell.dark .mini-awards-grid strong {
+  color: #f7fff9;
+}
+
+.app-shell.dark .mini-bracket-card {
+  background: #14201b;
+  border-color: #33453b;
+}
+
 .status-strip div {
   background: rgba(255, 255, 255, 0.82);
   padding: 14px 18px;
@@ -657,6 +691,11 @@ h3 {
   box-shadow:
     inset 0 0 0 1px rgba(0, 0, 0, 0.08),
     0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.compact-flag {
+  width: 24px;
+  height: 18px;
 }
 
 .team-code {
@@ -1909,7 +1948,7 @@ h3 {
 }
 
 .member-modal {
-  width: min(720px, 100%);
+  width: min(1120px, 100%);
   max-height: min(760px, calc(100svh - 40px));
   overflow: auto;
 }
@@ -1922,7 +1961,8 @@ h3 {
   padding: 8px 12px;
 }
 
-.prediction-list {
+.prediction-list,
+.member-pick-sections {
   display: grid;
   gap: 10px;
 }
@@ -1944,6 +1984,139 @@ h3 {
 
 .prediction-list span {
   color: #536158;
+}
+
+.member-picks-overview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  margin-bottom: 14px;
+  border: 1px solid #dce6df;
+  border-radius: 8px;
+  background: #dce6df;
+}
+
+.member-picks-overview div {
+  background: #ffffff;
+  padding: 12px 14px;
+}
+
+.member-picks-overview strong {
+  display: block;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.member-picks-overview span,
+.section-mini-head span,
+.mini-empty {
+  color: #647067;
+  font-size: 12px;
+}
+
+.member-pick-sections section {
+  display: grid;
+  gap: 10px;
+}
+
+.section-mini-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.section-mini-head h3 {
+  margin: 0;
+}
+
+.mini-group-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(128px, 1fr));
+  gap: 10px;
+}
+
+.mini-group-card,
+.mini-bracket-stage,
+.mini-awards-grid div {
+  border: 1px solid #e1eae4;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.mini-group-card {
+  display: grid;
+  gap: 7px;
+}
+
+.mini-rank-row {
+  display: grid;
+  grid-template-columns: 18px 1fr 28px;
+  align-items: center;
+  gap: 7px;
+  min-height: 24px;
+}
+
+.mini-rank-row span {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #eef7f1;
+  color: #0f8f4f;
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.mini-rank-row b,
+.mini-bracket-card b {
+  text-align: right;
+}
+
+.mini-bracket-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(94px, 1fr));
+  gap: 8px;
+  align-items: start;
+}
+
+.mini-bracket-stage {
+  display: grid;
+  gap: 8px;
+}
+
+.mini-bracket-card {
+  display: grid;
+  grid-template-columns: 24px 1fr auto 1fr 24px;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  border: 1px solid #edf2ef;
+  border-radius: 7px;
+  padding: 6px;
+  background: #fbfdfc;
+}
+
+.mini-bracket-card small {
+  grid-column: 1 / -1;
+  justify-self: end;
+  color: #0f8f4f;
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.mini-awards-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.mini-awards-grid div {
+  display: grid;
+  gap: 5px;
 }
 
 .readiness-grid {
@@ -2063,8 +2236,14 @@ h3 {
   .mvp-grid,
   .award-grid,
   .api-map,
-  .recipient-list {
+  .recipient-list,
+  .mini-group-grid,
+  .mini-awards-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mini-bracket-grid {
+    grid-template-columns: repeat(3, minmax(110px, 1fr));
   }
 }
 
@@ -2157,7 +2336,10 @@ h3 {
   .award-grid,
   .api-map,
   .recipient-list,
-  .award-search-row {
+  .award-search-row,
+  .mini-group-grid,
+  .mini-bracket-grid,
+  .mini-awards-grid {
     grid-template-columns: 1fr;
   }
 

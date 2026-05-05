@@ -103,6 +103,37 @@ function awardPickFromRow(row) {
 
 function leagueFromRows(league, members = [], activity = [], predictions = [], awardPicks = []) {
   if (!league) return null
+  const rawActivityStats = activity.reduce((stats, item) => {
+    if (item.activity_type !== 'prediction_saved' || !item.actor_id) return stats
+    const summary = String(item.metadata?.summary ?? '')
+    const bulkMatch = summary.match(/(\d+)\s+predictions/i)
+    const current = stats[item.actor_id] ?? { bulkCount: 0, fixtureKeys: new Set(), lastSavedAt: null }
+    if (bulkMatch) {
+      current.bulkCount = Math.max(current.bulkCount, Number(bulkMatch[1]))
+    } else if (item.metadata?.fixture_key) {
+      current.fixtureKeys.add(item.metadata.fixture_key)
+    } else if (summary) {
+      current.fixtureKeys.add(item.id)
+    }
+    stats[item.actor_id] = {
+      ...current,
+      lastSavedAt: [current.lastSavedAt, item.created_at].filter(Boolean).sort().at(-1) ?? null,
+    }
+    return stats
+  }, {})
+  const activityStats = Object.fromEntries(
+    Object.entries(rawActivityStats).map(([userId, stats]) => {
+      const predictionCount = Math.max(stats.bulkCount, stats.fixtureKeys.size)
+      return [
+        userId,
+        {
+          predictionCount,
+          lastSavedAt: stats.lastSavedAt,
+          points: predictionCount * MATCH_DRAFT_POINTS,
+        },
+      ]
+    }),
+  )
   const predictionStats = predictions.reduce((stats, prediction) => {
     const current = stats[prediction.user_id] ?? { predictionCount: 0, lastSavedAt: null, points: 0 }
     stats[prediction.user_id] = {
@@ -130,8 +161,8 @@ function leagueFromRows(league, members = [], activity = [], predictions = [], a
       id: member.user_id,
       displayName: member.profiles?.display_name ?? 'Member',
       role: member.role,
-      points: (predictionStats[member.user_id]?.points ?? 0) + (awardStats[member.user_id]?.points ?? 0),
-      predictionCount: predictionStats[member.user_id]?.predictionCount ?? 0,
+      points: (predictionStats[member.user_id]?.points ?? activityStats[member.user_id]?.points ?? 0) + (awardStats[member.user_id]?.points ?? 0),
+      predictionCount: predictionStats[member.user_id]?.predictionCount ?? activityStats[member.user_id]?.predictionCount ?? 0,
       awardCount: awardStats[member.user_id]?.awardCount ?? 0,
       predictions: predictions
         .filter((prediction) => prediction.user_id === member.user_id)
@@ -141,6 +172,7 @@ function leagueFromRows(league, members = [], activity = [], predictions = [], a
         .map(awardPickFromRow),
       lastSavedAt: [
         predictionStats[member.user_id]?.lastSavedAt,
+        activityStats[member.user_id]?.lastSavedAt,
         awardStats[member.user_id]?.lastSavedAt,
       ].filter(Boolean).sort().at(-1) ?? null,
     })),
@@ -279,10 +311,10 @@ export const supabaseMvpStore = {
 
     const { data: activity, error: activityError } = await client
       .from('league_activity')
-      .select('id, activity_type, metadata, created_at, profiles(display_name)')
+      .select('id, actor_id, activity_type, metadata, created_at, profiles(display_name)')
       .eq('league_id', league.id)
       .order('created_at', { ascending: false })
-      .limit(8)
+      .limit(200)
     if (activityError) throw activityError
 
     const memberIds = members.map((member) => member.user_id)
