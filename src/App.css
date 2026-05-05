@@ -1871,6 +1871,18 @@ h3 {
   font-size: 24px;
 }
 
+.app-shell.dark .league-stats div {
+  background: #f5f8f6;
+}
+
+.app-shell.dark .league-stats strong {
+  color: #101814;
+}
+
+.app-shell.dark .league-stats span {
+  color: #1f2b24;
+}
+
 .league-standings {
   align-content: start;
 }
