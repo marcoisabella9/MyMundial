@@ -7,16 +7,21 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "remotion:studio": "remotion studio src/remotion/index.jsx",
+    "remotion:render": "remotion render src/remotion/index.jsx MyMundialLaunch out/mymundial-launch.mp4",
+    "remotion:still": "remotion still src/remotion/index.jsx MyMundialLaunch --frame=165 --scale=0.25 out/mymundial-launch-frame.png"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.1",
     "lucide-react": "^1.11.0",
     "react": "^19.2.5",
-    "react-dom": "^19.2.5"
+    "react-dom": "^19.2.5",
+    "remotion": "^4.0.455"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@remotion/cli": "^4.0.455",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
