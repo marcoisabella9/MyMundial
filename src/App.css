@@ -1,3 +1,19 @@
+html {
+  min-height: 100%;
+  background: #07120e;
+}
+
+body {
+  min-height: 100%;
+  margin: 0;
+  background: #07120e;
+}
+
+#root {
+  min-height: 100svh;
+  background: #07120e;
+}
+
 .app-shell {
   min-height: 100svh;
   display: grid;
@@ -2926,14 +2942,15 @@ h3 {
 @media (max-width: 860px) {
   .app-shell {
     display: block;
+    min-height: 100dvh;
   }
 
   .sidebar {
     position: fixed;
-    inset: auto 0 0;
+    inset: auto 0 0 0;
     z-index: 10;
     min-height: 0;
-    padding: 8px;
+    padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
   }
 
   .brand,
@@ -2951,7 +2968,11 @@ h3 {
   }
 
   .workspace {
-    padding: 18px 14px 82px;
+    padding:
+      calc(18px + env(safe-area-inset-top))
+      max(14px, env(safe-area-inset-right))
+      calc(82px + env(safe-area-inset-bottom))
+      max(14px, env(safe-area-inset-left));
   }
 
   .topbar,
