@@ -368,6 +368,7 @@ function App() {
   const [awardPicks, setAwardPicks] = useState({})
   const [fixtureResults, setFixtureResults] = useState({})
   const [awardResults, setAwardResults] = useState({})
+  const [fixtureLocks, setFixtureLocks] = useState({})
   const [isAdmin, setIsAdmin] = useState(false)
   const [resultStatus, setResultStatus] = useState({ loading: false, message: '', error: '' })
   const [matchContext, setMatchContext] = useState(defaultMatchContext)
@@ -443,6 +444,7 @@ function App() {
         setIsAdmin(remoteIsAdmin)
         setFixtureResults(remoteResults.fixtures)
         setAwardResults(remoteResults.awards)
+        setFixtureLocks(remoteResults.locks ?? {})
         setAuthStatus({
           loading: false,
           message: remotePredictions.length > 0 ? 'Synced saved picks from Supabase.' : 'Signed in. Picks will autosave.',
@@ -648,7 +650,166 @@ function App() {
       })),
   ), [bracketRounds])
 
+  const resultBracketRounds = useMemo(() => {
+    function resultScoreFor(match) {
+      const result = fixtureResults[match.id]
+      if (!result || !match.a || !match.b) return null
+      if (result.homeTeam !== match.a.team || result.awayTeam !== match.b.team) return null
+      return {
+        homeScore: result.homeScore,
+        awayScore: result.awayScore,
+        advancerTeam: result.advancingTeam,
+      }
+    }
+
+    function resultState(match) {
+      const score = resultScoreFor(match)
+      if (!score) return 'pending'
+      if (score.homeScore === score.awayScore && !score.advancerTeam) return 'needs winner'
+      return 'picked'
+    }
+
+    function officialWinner(match) {
+      const score = resultScoreFor(match)
+      if (!match.a || !match.b || !score) return undefined
+      if (score.homeScore === score.awayScore) {
+        if (score.advancerTeam === match.a.team) return match.a
+        if (score.advancerTeam === match.b.team) return match.b
+        return undefined
+      }
+      return score.homeScore > score.awayScore ? match.a : match.b
+    }
+
+    function officialLoser(match) {
+      const picked = officialWinner(match)
+      if (!picked || !match.a || !match.b) return undefined
+      return picked.team === match.a.team ? match.b : match.a
+    }
+
+    const usedSeeds = new Set()
+    const pickSeed = (seedOrSeeds, opposingSlot) => {
+      const seeds = Array.isArray(seedOrSeeds) ? seedOrSeeds : [seedOrSeeds]
+      const available = seeds.find((seed) => playableQualifierBySeed.has(seed) && !usedSeeds.has(seed))
+      if (available) {
+        usedSeeds.add(available)
+        return playableQualifierBySeed.get(available)
+      }
+      const fallback = [...playableQualifierBySeed.entries()].find(([seed, slot]) =>
+        !usedSeeds.has(seed) && (!opposingSlot || slot.group !== opposingSlot.group),
+      )
+      if (!fallback) return undefined
+      usedSeeds.add(fallback[0])
+      return fallback[1]
+    }
+
+    const r32 = roundOf32Template.map(([homeSeed, awaySeeds], index) => {
+      const homeSlot = pickSeed(homeSeed)
+      const awaySlot = pickSeed(awaySeeds, homeSlot)
+      return { id: `r32-${index}`, a: homeSlot, b: awaySlot, state: 'pending', fallbackHome: 0, fallbackAway: 0 }
+    })
+    r32.forEach((match) => { match.state = resultState(match) })
+    r32.forEach((match) => { match.picked = officialWinner(match) })
+    const r16 = Array.from({ length: 8 }, (_, index) => ({
+      id: `r16-${index}`,
+      a: r32[index * 2]?.picked,
+      b: r32[index * 2 + 1]?.picked,
+      state: 'pending',
+      fallbackHome: 0,
+      fallbackAway: 0,
+    }))
+    r16.forEach((match) => { match.state = resultState(match) })
+    r16.forEach((match) => { match.picked = officialWinner(match) })
+    const qf = Array.from({ length: 4 }, (_, index) => ({
+      id: `qf-${index}`,
+      a: r16[index * 2]?.picked,
+      b: r16[index * 2 + 1]?.picked,
+      state: 'pending',
+      fallbackHome: 0,
+      fallbackAway: 0,
+    }))
+    qf.forEach((match) => { match.state = resultState(match) })
+    qf.forEach((match) => { match.picked = officialWinner(match) })
+    const sf = Array.from({ length: 2 }, (_, index) => ({
+      id: `sf-${index}`,
+      a: qf[index * 2]?.picked,
+      b: qf[index * 2 + 1]?.picked,
+      state: 'pending',
+      fallbackHome: 0,
+      fallbackAway: 0,
+    }))
+    sf.forEach((match) => { match.state = resultState(match) })
+    sf.forEach((match) => { match.picked = officialWinner(match) })
+    const final = [{ id: 'final-0', label: 'Final', a: sf[0]?.picked, b: sf[1]?.picked, state: 'pending', fallbackHome: 0, fallbackAway: 0 }]
+    final[0].state = resultState(final[0])
+    final[0].picked = officialWinner(final[0])
+    const thirdPlace = [{
+      id: 'third-0',
+      label: '3rd Place',
+      a: officialLoser(sf[0]),
+      b: officialLoser(sf[1]),
+      state: 'pending',
+      fallbackHome: 0,
+      fallbackAway: 0,
+    }]
+    thirdPlace[0].state = resultState(thirdPlace[0])
+    thirdPlace[0].picked = officialWinner(thirdPlace[0])
+    return [
+      ['R32', r32],
+      ['R16', r16],
+      ['QF', qf],
+      ['SF', sf],
+      ['Finals', [...final, ...thirdPlace]],
+    ]
+  }, [fixtureResults, playableQualifierBySeed])
+
+  const resultKnockoutMatchContexts = useMemo(() => resultBracketRounds.flatMap(([round, matches]) =>
+    matches
+      .filter((match) => match.a?.team && match.b?.team)
+      .map((match) => ({
+        id: match.id,
+        type: 'bracket',
+        stage: match.label ?? round,
+        home: match.a.team,
+        away: match.b.team,
+        venue: match.label === 'Final' ? 'New York New Jersey Stadium' : match.label === '3rd Place' ? 'Hard Rock Stadium' : 'Mercedes-Benz Stadium',
+        date: `MVP schedule - ${lockText(knockoutLockAt(match.label ?? round)).toLowerCase()}`,
+        lockAt: knockoutLockAt(match.label ?? round),
+        events: liveEvents,
+        backView: 'bracket',
+        fallbackHome: match.fallbackHome,
+        fallbackAway: match.fallbackAway,
+      })),
+  ), [resultBracketRounds])
+
+  const resultKnockoutFixtureRows = useMemo(() => resultBracketRounds.flatMap(([round, matches]) =>
+    matches.map((match) => {
+      const isReady = Boolean(match.a?.team && match.b?.team)
+      const stage = match.label ?? round
+      return {
+        id: match.id,
+        type: 'bracket',
+        stage,
+        home: match.a?.team ?? 'TBD',
+        away: match.b?.team ?? 'TBD',
+        venue: match.label === 'Final' ? 'New York New Jersey Stadium' : match.label === '3rd Place' ? 'Hard Rock Stadium' : 'Mercedes-Benz Stadium',
+        date: `MVP schedule - ${lockText(knockoutLockAt(stage)).toLowerCase()}`,
+        lockAt: knockoutLockAt(stage),
+        events: liveEvents,
+        backView: 'bracket',
+        fallbackHome: match.fallbackHome,
+        fallbackAway: match.fallbackAway,
+        isReady,
+        blockedReason: isReady ? '' : `${stage} waits for earlier official results`,
+      }
+    }),
+  ), [resultBracketRounds])
+
   const matchSequence = useMemo(() => [...groupMatchContexts, ...knockoutMatchContexts], [groupMatchContexts, knockoutMatchContexts])
+  const resultMatchSequence = useMemo(() => [...groupMatchContexts, ...resultKnockoutMatchContexts], [groupMatchContexts, resultKnockoutMatchContexts])
+  const resultFixtureRows = useMemo(() => [
+    ...groupMatchContexts.map((match) => ({ ...match, isReady: true, blockedReason: '' })),
+    ...resultKnockoutFixtureRows,
+  ], [groupMatchContexts, resultKnockoutFixtureRows])
   const leagueRows = useMemo(() => league.members
     .map((member) => {
       const completion = memberCompletion(member)
@@ -671,7 +832,7 @@ function App() {
   }
 
   const activeScore = scoreForContext(matchContext)
-  const activeLocked = isLockedAt(matchContext.lockAt)
+  const activeLocked = isLockedAt(matchContext.lockAt) || Boolean(fixtureLocks[matchContext.id])
   const awardsLocked = isLockedAt(AWARD_LOCK_AT)
   const isKnockoutTie = matchContext.type === 'bracket' && activeScore.homeScore === activeScore.awayScore
   const pickComplete = matchContext.type === 'group'
@@ -732,7 +893,7 @@ function App() {
   }
 
   function updateScore(team, delta) {
-    if (isLockedAt(matchContext.lockAt)) {
+    if (isLockedAt(matchContext.lockAt) || fixtureLocks[matchContext.id]) {
       setSaveStatus({ loading: false, message: '', error: 'This match is locked. Picks can no longer be changed.' })
       return
     }
@@ -768,7 +929,7 @@ function App() {
 
   function pickAdvancer(team) {
     if (matchContext.type !== 'bracket') return
-    if (isLockedAt(matchContext.lockAt)) {
+    if (isLockedAt(matchContext.lockAt) || fixtureLocks[matchContext.id]) {
       setSaveStatus({ loading: false, message: '', error: 'This match is locked. Picks can no longer be changed.' })
       return
     }
@@ -833,6 +994,7 @@ function App() {
       setAwardPicks({})
       setFixtureResults({})
       setAwardResults({})
+      setFixtureLocks({})
       setIsAdmin(false)
       setPredictionCount(0)
       setLastSavedAt(null)
@@ -971,6 +1133,7 @@ function App() {
       ])
       setFixtureResults(remoteResults.fixtures)
       setAwardResults(remoteResults.awards)
+      setFixtureLocks(remoteResults.locks ?? {})
       if (remoteLeague) setLeague(remoteLeague)
       setResultStatus({
         loading: false,
@@ -996,8 +1159,76 @@ function App() {
       ])
       setFixtureResults(remoteResults.fixtures)
       setAwardResults(remoteResults.awards)
+      setFixtureLocks(remoteResults.locks ?? {})
       if (remoteLeague) setLeague(remoteLeague)
       setResultStatus({ loading: false, message: `${savedAward.awardLabel} settled as ${savedAward.recipient}.`, error: '' })
+    } catch (error) {
+      setResultStatus({ loading: false, message: '', error: error.message })
+    }
+  }
+
+  async function clearFixtureResult(context) {
+    if (!isSignedIn || !isAdmin) {
+      setResultStatus({ loading: false, message: '', error: 'Admin access is required to reset results.' })
+      return
+    }
+    setResultStatus({ loading: true, message: `Resetting ${context.home} vs ${context.away}...`, error: '' })
+    try {
+      await supabaseMvpStore.clearFixtureResult(context)
+      const [remoteResults, remoteLeague] = await Promise.all([
+        supabaseMvpStore.loadResults(),
+        supabaseMvpStore.loadLeague(currentUser),
+      ])
+      setFixtureResults(remoteResults.fixtures)
+      setAwardResults(remoteResults.awards)
+      setFixtureLocks(remoteResults.locks ?? {})
+      if (remoteLeague) setLeague(remoteLeague)
+      setResultStatus({ loading: false, message: `${context.home} vs ${context.away} reset to not played.`, error: '' })
+    } catch (error) {
+      setResultStatus({ loading: false, message: '', error: error.message })
+    }
+  }
+
+  async function toggleFixtureLock(context) {
+    if (!isSignedIn || !isAdmin) {
+      setResultStatus({ loading: false, message: '', error: 'Admin access is required to lock predictions.' })
+      return
+    }
+    const isFixtureLocked = Boolean(fixtureLocks[context.id])
+    setResultStatus({ loading: true, message: `${isFixtureLocked ? 'Unlocking' : 'Locking'} ${context.home} vs ${context.away}...`, error: '' })
+    try {
+      if (isFixtureLocked) {
+        await supabaseMvpStore.unlockFixture(context)
+      } else {
+        await supabaseMvpStore.lockFixture(context)
+      }
+      const remoteResults = await supabaseMvpStore.loadResults()
+      setFixtureResults(remoteResults.fixtures)
+      setAwardResults(remoteResults.awards)
+      setFixtureLocks(remoteResults.locks ?? {})
+      setResultStatus({ loading: false, message: `${context.home} vs ${context.away} ${isFixtureLocked ? 'unlocked' : 'locked'}.`, error: '' })
+    } catch (error) {
+      setResultStatus({ loading: false, message: '', error: error.message })
+    }
+  }
+
+  async function clearAwardResult(award) {
+    if (!isSignedIn || !isAdmin) {
+      setResultStatus({ loading: false, message: '', error: 'Admin access is required to reset award results.' })
+      return
+    }
+    setResultStatus({ loading: true, message: `Resetting ${award.label}...`, error: '' })
+    try {
+      await supabaseMvpStore.clearAwardResult(award)
+      const [remoteResults, remoteLeague] = await Promise.all([
+        supabaseMvpStore.loadResults(),
+        supabaseMvpStore.loadLeague(currentUser),
+      ])
+      setFixtureResults(remoteResults.fixtures)
+      setAwardResults(remoteResults.awards)
+      setFixtureLocks(remoteResults.locks ?? {})
+      if (remoteLeague) setLeague(remoteLeague)
+      setResultStatus({ loading: false, message: `${award.label} reset to pending.`, error: '' })
     } catch (error) {
       setResultStatus({ loading: false, message: '', error: error.message })
     }
@@ -1075,7 +1306,7 @@ function App() {
         )}
 
         {view === 'groups' && (
-          <GroupsView standings={standings} openMatch={openMatch} groupScores={groupScores} />
+          <GroupsView standings={standings} openMatch={openMatch} groupScores={groupScores} fixtureResults={fixtureResults} />
         )}
 
         {view === 'bracket' && (
@@ -1092,33 +1323,51 @@ function App() {
                 {bracketRounds.map(([round, matches], roundIndex) => (
                   <div className={`round-column round-${roundIndex}`} key={round}>
                     <h3>{round}</h3>
-                    {matches.map((match, matchIndex) => (
-                      <button
-                        className={`match-card ${match.state}`}
-                        key={match.id}
-                        style={{ '--slot-row': bracketSlotRow(roundIndex, matchIndex) }}
-                        disabled={!match.a?.team || !match.b?.team}
-                        onClick={() => openMatch({
-                          id: match.id,
-                          type: 'bracket',
-                          stage: match.label ?? round,
-                          home: match.a?.team ?? 'TBD',
-                          away: match.b?.team ?? 'TBD',
-                          venue: match.label === 'Final' ? 'New York New Jersey Stadium' : match.label === '3rd Place' ? 'Hard Rock Stadium' : 'Mercedes-Benz Stadium',
-                          date: `MVP schedule - ${lockText(knockoutLockAt(match.label ?? round)).toLowerCase()}`,
-                          lockAt: knockoutLockAt(match.label ?? round),
-                          events: liveEvents,
-                          backView: 'bracket',
-                          fallbackHome: match.fallbackHome,
-                          fallbackAway: match.fallbackAway,
-                        })}
-                      >
-                        {match.label && <span className="match-label">{match.label}</span>}
-                        <MatchTeam slot={match.a?.team && match.b?.team ? match.a : undefined} score={(bracketScores[match.id]?.homeScore ?? match.fallbackHome)} picked={match.picked?.team === match.a?.team} />
-                        <MatchTeam slot={match.a?.team && match.b?.team ? match.b : undefined} score={(bracketScores[match.id]?.awayScore ?? match.fallbackAway)} picked={match.picked?.team === match.b?.team} />
-                        <span className="match-state">{bracketPickLabel(match, bracketScores[match.id])}</span>
-                      </button>
-                    ))}
+                    {matches.map((match, matchIndex) => {
+                      const context = {
+                        id: match.id,
+                        type: 'bracket',
+                        stage: match.label ?? round,
+                        home: match.a?.team ?? 'TBD',
+                        away: match.b?.team ?? 'TBD',
+                        venue: match.label === 'Final' ? 'New York New Jersey Stadium' : match.label === '3rd Place' ? 'Hard Rock Stadium' : 'Mercedes-Benz Stadium',
+                        date: `MVP schedule - ${lockText(knockoutLockAt(match.label ?? round)).toLowerCase()}`,
+                        lockAt: knockoutLockAt(match.label ?? round),
+                        events: liveEvents,
+                        backView: 'bracket',
+                        fallbackHome: match.fallbackHome,
+                        fallbackAway: match.fallbackAway,
+                      }
+                      const score = bracketScores[match.id]
+                      const settlement = score && match.a?.team && match.b?.team
+                        ? settlementForPredictionView(predictionFromContextScore(context, score), fixtureResults)
+                        : null
+                      return (
+                        <button
+                          className={`match-card ${match.state} ${settlement?.mode === 'settled' ? `settled ${settlement.state}` : ''}`}
+                          key={match.id}
+                          style={{ '--slot-row': bracketSlotRow(roundIndex, matchIndex) }}
+                          disabled={!match.a?.team || !match.b?.team}
+                          onClick={() => openMatch(context)}
+                        >
+                          {match.label && <span className="match-label">{match.label}</span>}
+                          <MatchTeam
+                            slot={match.a?.team && match.b?.team ? match.a : undefined}
+                            score={(bracketScores[match.id]?.homeScore ?? match.fallbackHome)}
+                            picked={match.picked?.team === match.a?.team}
+                            recognized={settlement?.recognizedTeams?.includes(match.a?.team)}
+                          />
+                          <MatchTeam
+                            slot={match.a?.team && match.b?.team ? match.b : undefined}
+                            score={(bracketScores[match.id]?.awayScore ?? match.fallbackAway)}
+                            picked={match.picked?.team === match.b?.team}
+                            recognized={settlement?.recognizedTeams?.includes(match.b?.team)}
+                          />
+                          <span className="match-state">{settlement?.mode === 'settled' ? settlement.label : bracketPickLabel(match, score)}</span>
+                          {settlement?.mode === 'settled' && <span className="settlement-detail">{settlement.detail}</span>}
+                        </button>
+                      )
+                    })}
                   </div>
                 ))}
               </div>
@@ -1141,8 +1390,9 @@ function App() {
               saveStatus={saveStatus}
               isSignedIn={isSignedIn}
               isLocked={activeLocked}
+              settlement={pickComplete ? settlementForPredictionView(predictionFromContextScore(matchContext, activeScore), fixtureResults) : null}
             />
-            <MvpMatchRail context={matchContext} score={activeScore} />
+            <MvpMatchRail context={matchContext} score={activeScore} settlement={pickComplete ? settlementForPredictionView(predictionFromContextScore(matchContext, activeScore), fixtureResults) : null} />
           </section>
         )}
 
@@ -1191,7 +1441,10 @@ function App() {
             {selectedLeagueMember && (
               <MemberPredictionModal
                 member={selectedLeagueMember}
+                scoringMode={league.scoringMode}
                 matchSequence={matchSequence}
+                fixtureResults={fixtureResults}
+                awardResults={awardResults}
                 onClose={() => setSelectedLeagueMemberId(null)}
               />
             )}
@@ -1203,6 +1456,7 @@ function App() {
             selectedAward={selectedAward}
             setSelectedAward={setSelectedAward}
             awardPicks={awardPicks}
+            awardResults={awardResults}
             onSaveAwardPick={saveAwardPick}
             awardSaveStatus={awardSaveStatus}
             isSignedIn={isSignedIn}
@@ -1213,11 +1467,16 @@ function App() {
 
         {view === 'results' && isAdmin && (
           <ResultsView
-            matchSequence={matchSequence}
+            matchSequence={resultMatchSequence}
+            fixtureRows={resultFixtureRows}
             fixtureResults={fixtureResults}
             awardResults={awardResults}
+            fixtureLocks={fixtureLocks}
             onSaveFixtureResult={saveFixtureResult}
+            onClearFixtureResult={clearFixtureResult}
+            onToggleFixtureLock={toggleFixtureLock}
             onSaveAwardResult={saveAwardResult}
+            onClearAwardResult={clearAwardResult}
             resultStatus={resultStatus}
           />
         )}
@@ -1270,6 +1529,202 @@ function bracketPickLabel(match, score) {
 
 function scoreKey(prediction) {
   return `${prediction.homeTeam} ${prediction.predictedHomeScore}-${prediction.predictedAwayScore} ${prediction.awayTeam}`
+}
+
+const GROUP_TOTAL_POINTS = 160
+const KNOCKOUT_TOTAL_POINTS = 260
+
+function predictionOutcome(homeScore, awayScore, homeTeam, awayTeam, advancingTeam, fixtureType) {
+  if (fixtureType === 'bracket' && homeScore === awayScore) return advancingTeam ?? null
+  if (homeScore === awayScore) return 'draw'
+  return homeScore > awayScore ? homeTeam : awayTeam
+}
+
+function resultOutcome(result) {
+  if (!result) return null
+  return predictionOutcome(
+    result.homeScore,
+    result.awayScore,
+    result.homeTeam,
+    result.awayTeam,
+    result.advancingTeam,
+    result.fixtureType,
+  )
+}
+
+function resultTeams(result) {
+  return result ? [result.homeTeam, result.awayTeam] : []
+}
+
+function scorePairForTeam(record, team, homeKey, awayKey) {
+  if (!record || !team) return null
+  if (record.homeTeam === team) return { teamScore: record[homeKey], opponentScore: record[awayKey] }
+  if (record.awayTeam === team) return { teamScore: record[awayKey], opponentScore: record[homeKey] }
+  return null
+}
+
+function sameOrderedFixture(prediction, result) {
+  return Boolean(
+    result
+    && prediction.fixtureId === result.fixtureKey
+    && prediction.homeTeam === result.homeTeam
+    && prediction.awayTeam === result.awayTeam,
+  )
+}
+
+function knockoutSettlementForPrediction(prediction, fixtureResults) {
+  const stageResults = Object.values(fixtureResults).filter((result) => (
+    result.fixtureType === 'bracket' && result.stage === prediction.stage
+  ))
+  if (!stageResults.length) return null
+  const predictedWinner = predictionOutcome(
+    prediction.predictedHomeScore,
+    prediction.predictedAwayScore,
+    prediction.homeTeam,
+    prediction.awayTeam,
+    prediction.advancingTeam,
+    prediction.fixtureType,
+  )
+  const predictedOtherTeam = predictedWinner === prediction.homeTeam ? prediction.awayTeam : prediction.homeTeam
+  const winnerResult = stageResults.find((result) => resultOutcome(result) === predictedWinner)
+  const winnerAppearanceResult = stageResults.find((result) => resultTeams(result).includes(predictedWinner))
+  const otherAppearanceResult = stageResults.find((result) => resultTeams(result).includes(predictedOtherTeam))
+  const winnerCorrect = Boolean(winnerResult)
+  const winnerParticipantCorrect = Boolean(winnerAppearanceResult)
+  const participantCorrect = Boolean(otherAppearanceResult)
+  const comparisonTeam = winnerCorrect || winnerAppearanceResult
+    ? predictedWinner
+    : participantCorrect
+      ? predictedOtherTeam
+      : null
+  const comparisonResult = winnerResult ?? winnerAppearanceResult ?? otherAppearanceResult ?? null
+  const predictionPair = scorePairForTeam(prediction, comparisonTeam, 'predictedHomeScore', 'predictedAwayScore')
+  const resultPair = scorePairForTeam(comparisonResult, comparisonTeam, 'homeScore', 'awayScore')
+  const canScoreScore = Boolean(predictionPair && resultPair)
+  const exactCorrect = canScoreScore
+    && predictionPair.teamScore === resultPair.teamScore
+    && predictionPair.opponentScore === resultPair.opponentScore
+  const goalDifferenceCorrect = canScoreScore
+    && predictionPair.teamScore - predictionPair.opponentScore === resultPair.teamScore - resultPair.opponentScore
+  const points =
+    (winnerParticipantCorrect ? 50 : 0)
+    + (participantCorrect ? 50 : 0)
+    + (winnerCorrect ? 100 : 0)
+    + (exactCorrect ? 40 : 0)
+    + (goalDifferenceCorrect ? 20 : 0)
+  const recognizedTeams = [
+    winnerParticipantCorrect ? predictedWinner : null,
+    participantCorrect ? predictedOtherTeam : null,
+  ].filter(Boolean)
+  return {
+    mode: 'settled',
+    state: points === KNOCKOUT_TOTAL_POINTS ? 'correct' : points > 0 ? 'partial' : 'missed',
+    points,
+    total: KNOCKOUT_TOTAL_POINTS,
+    label: `${points}/${KNOCKOUT_TOTAL_POINTS} pts`,
+    detail: points ? `${recognizedTeams.map((team) => meta(team).code).join(', ')} recognized at ${prediction.stage}` : 'Missed',
+    breakdown: {
+      outcomeCorrect: winnerCorrect,
+      winnerParticipantCorrect,
+      participantCorrect,
+      exactCorrect,
+      goalDifferenceCorrect,
+    },
+    result: comparisonResult ?? stageResults[0],
+    recognizedTeams,
+  }
+}
+
+function settlementForPredictionView(prediction, fixtureResults) {
+  const directResult = fixtureResults[prediction.fixtureId]
+  if (!prediction) return null
+  if (prediction.fixtureType === 'bracket') {
+    const knockoutSettlement = knockoutSettlementForPrediction(prediction, fixtureResults)
+    if (knockoutSettlement) return knockoutSettlement
+  }
+  if (!directResult) {
+    return {
+      mode: 'pending',
+      state: 'pending',
+      points: 0,
+      total: prediction.fixtureType === 'bracket' ? KNOCKOUT_TOTAL_POINTS : GROUP_TOTAL_POINTS,
+      label: 'Pending',
+      detail: 'No result yet',
+      breakdown: {
+        outcomeCorrect: false,
+        winnerParticipantCorrect: false,
+        participantCorrect: false,
+        exactCorrect: false,
+        goalDifferenceCorrect: false,
+      },
+      recognizedTeams: [],
+    }
+  }
+  const result = directResult
+  const predictedWinner = predictionOutcome(
+    prediction.predictedHomeScore,
+    prediction.predictedAwayScore,
+    prediction.homeTeam,
+    prediction.awayTeam,
+    prediction.advancingTeam,
+    prediction.fixtureType,
+  )
+  const actualWinner = resultOutcome(result)
+  const outcomeCorrect = Boolean(predictedWinner && actualWinner && predictedWinner === actualWinner)
+  const canScoreExact = sameOrderedFixture(prediction, result)
+  const exactCorrect = canScoreExact
+    && prediction.predictedHomeScore === result.homeScore
+    && prediction.predictedAwayScore === result.awayScore
+  const goalDifferenceCorrect = canScoreExact
+    && prediction.predictedHomeScore - prediction.predictedAwayScore === result.homeScore - result.awayScore
+  const points = (outcomeCorrect ? 100 : 0) + (exactCorrect ? 40 : 0) + (goalDifferenceCorrect ? 20 : 0)
+  return {
+    mode: 'settled',
+    state: points === GROUP_TOTAL_POINTS ? 'correct' : points > 0 ? 'partial' : 'missed',
+    points,
+    total: GROUP_TOTAL_POINTS,
+    label: `${points}/${GROUP_TOTAL_POINTS} pts`,
+    detail: points ? 'Points earned' : 'Missed',
+    breakdown: {
+      outcomeCorrect,
+      winnerParticipantCorrect: false,
+      participantCorrect: false,
+      exactCorrect,
+      goalDifferenceCorrect,
+    },
+    result,
+    recognizedTeams: outcomeCorrect && predictedWinner !== 'draw' ? [predictedWinner] : [],
+  }
+}
+
+function predictionFromContextScore(context, score) {
+  const advancingTeam = score.advancerTeam
+    ?? (score.homeScore > score.awayScore ? context.home : score.homeScore < score.awayScore ? context.away : null)
+  return {
+    fixtureId: context.id,
+    fixtureType: context.type,
+    stage: context.stage,
+    homeTeam: context.home,
+    awayTeam: context.away,
+    predictedHomeScore: score.homeScore,
+    predictedAwayScore: score.awayScore,
+    advancingTeam,
+  }
+}
+
+function awardSettlementView(award, awardPick, awardResults) {
+  const result = awardResults[award.id]
+  if (!result) return { mode: 'pending', state: 'pending', points: 0, total: award.points, label: 'Pending', detail: 'No result yet' }
+  const correct = awardPick?.recipient?.trim().toLowerCase() === result.recipient.trim().toLowerCase()
+  return {
+    mode: 'settled',
+    state: correct ? 'correct' : 'missed',
+    points: correct ? award.points : 0,
+    total: award.points,
+    label: `${correct ? award.points : 0}/${award.points} pts`,
+    detail: correct ? 'Correct' : `Official: ${result.recipient}`,
+    result,
+  }
 }
 
 function standingsForPredictions(predictions) {
@@ -1331,7 +1786,7 @@ function predictionsFromActivity(member, matchSequence) {
   return Array.from(rowsByFixture.values())
 }
 
-function GroupsView({ standings, openMatch, groupScores }) {
+function GroupsView({ standings, openMatch, groupScores, fixtureResults }) {
   return (
     <section className="groups-page">
       <div className="panel wide">
@@ -1361,27 +1816,32 @@ function GroupsView({ standings, openMatch, groupScores }) {
               <div className="group-matches">
                 {groupMatchups.filter((match) => match.group === group.id).map((match) => {
                   const score = groupScores[match.id]
+                  const context = {
+                    id: match.id,
+                    type: 'group',
+                    stage: `Group ${match.group}`,
+                    home: match.home,
+                    away: match.away,
+                    venue: match.venue,
+                    date: `${match.date} - ${lockText(groupLockAt(match)).toLowerCase()}`,
+                    lockAt: groupLockAt(match),
+                    events: groupMatchEvents,
+                    backView: 'groups',
+                  }
+                  const settlement = score.touched
+                    ? settlementForPredictionView(predictionFromContextScore(context, score), fixtureResults)
+                    : null
                   return (
                     <button
-                      className={`group-match ${score.touched ? 'has-pick' : 'no-pick'} ${score.touched && score.homeScore === score.awayScore ? 'draw-pick' : ''}`}
+                      className={`group-match ${score.touched ? 'has-pick' : 'no-pick'} ${score.touched && score.homeScore === score.awayScore ? 'draw-pick' : ''} ${settlement?.mode === 'settled' ? `settled ${settlement.state}` : ''}`}
                       key={match.id}
-                      onClick={() => openMatch({
-                        id: match.id,
-                        type: 'group',
-                        stage: `Group ${match.group}`,
-                        home: match.home,
-                        away: match.away,
-                        venue: match.venue,
-                        date: `${match.date} - ${lockText(groupLockAt(match)).toLowerCase()}`,
-                        lockAt: groupLockAt(match),
-                        events: groupMatchEvents,
-                        backView: 'groups',
-                      })}
+                      onClick={() => openMatch(context)}
                     >
                       <TeamBadge team={match.home} />
                       <strong>{score.homeScore} - {score.awayScore}</strong>
                       <TeamBadge team={match.away} />
-                      <span className="pick-status">{groupPickLabel(score)}</span>
+                      <span className="pick-status">{settlement?.mode === 'settled' ? settlement.label : groupPickLabel(score)}</span>
+                      {settlement?.mode === 'settled' && <span className="settlement-detail">{settlement.detail}</span>}
                     </button>
                   )
                 })}
@@ -1394,10 +1854,10 @@ function GroupsView({ standings, openMatch, groupScores }) {
   )
 }
 
-function MatchTeam({ slot, score, picked }) {
+function MatchTeam({ slot, score, picked, recognized }) {
   if (!slot) return <div className="match-team muted">TBD</div>
   return (
-    <div className="match-team">
+    <div className={`match-team ${recognized ? 'recognized' : ''}`}>
       <TeamBadge team={slot.team} seed={slot.seed} />
       <strong>{score}</strong>
       {picked && <Check size={14} />}
@@ -1418,6 +1878,7 @@ function MatchPanel({
   saveStatus,
   isSignedIn,
   isLocked,
+  settlement,
   compact = false,
 }) {
   const saveTooltip = isLocked
@@ -1438,12 +1899,28 @@ function MatchPanel({
       <div className="score-hero">
         <TeamBadge team={context.home} />
         <div className="score-center">
-          <span className="pill live">{context.stage} - prediction</span>
+          <span className="pill live">{context.stage} - your pick</span>
           <strong>{score.homeScore} - {score.awayScore}</strong>
           <small>{context.venue}</small>
         </div>
         <TeamBadge team={context.away} />
       </div>
+      {settlement?.mode === 'settled' && (
+        <div className={`official-result-card ${settlement.state}`}>
+          <div>
+            <span>Official result</span>
+            <strong>
+              {settlement.result.homeTeam} {settlement.result.homeScore}-{settlement.result.awayScore} {settlement.result.awayTeam}
+            </strong>
+            {settlement.result.advancingTeam && <small>{settlement.result.advancingTeam} advanced</small>}
+          </div>
+          <div>
+            <span>Points earned</span>
+            <strong>{settlement.points}/{settlement.total}</strong>
+            <small>{settlement.detail}</small>
+          </div>
+        </div>
+      )}
       <div className="score-controls">
         {[context.home, context.away].map((team) => (
           <div className="stepper" key={team}>
@@ -1476,17 +1953,52 @@ function MatchPanel({
       {(saveStatus.message || saveStatus.error) && (
         <p className={`save-message ${saveStatus.error ? 'error' : ''}`}>{saveStatus.error || saveStatus.message}</p>
       )}
+      {settlement?.mode === 'settled' && (
+        <div className={`settlement-summary ${settlement.state}`}>
+          <strong>{settlement.label}</strong>
+          <span>
+            Your pick: {context.home} {score.homeScore}-{score.awayScore} {context.away}
+            {score.advancerTeam ? `, ${score.advancerTeam} advances` : ''}
+          </span>
+        </div>
+      )}
       <div className="points-stack">
-        <ScoreLine label={context.type === 'bracket' ? 'Advancer picked' : 'Result picked'} value={pickComplete ? '+100' : 'pending'} state={pickComplete ? 'correct' : 'pending'} />
-        <ScoreLine label="Exact score" value={pickComplete ? '+40' : 'pending'} state={pickComplete ? 'partial' : 'pending'} />
-        <ScoreLine label="Goal difference" value={pickComplete ? '+20' : 'pending'} state={pickComplete ? 'partial' : 'pending'} />
+        {context.type === 'bracket' && (
+          <ScoreLine
+            label="Predicted winner reached stage"
+            value={settlement?.mode === 'settled' ? (settlement.breakdown.winnerParticipantCorrect ? '+50' : '+0') : pickComplete ? '+50 possible' : 'pending'}
+            state={settlement?.mode === 'settled' ? settlement.breakdown.winnerParticipantCorrect ? 'correct' : 'missed' : pickComplete ? 'partial' : 'pending'}
+          />
+        )}
+        {context.type === 'bracket' && (
+          <ScoreLine
+            label="Other team reached stage"
+            value={settlement?.mode === 'settled' ? (settlement.breakdown.participantCorrect ? '+50' : '+0') : pickComplete ? '+50 possible' : 'pending'}
+            state={settlement?.mode === 'settled' ? settlement.breakdown.participantCorrect ? 'correct' : 'missed' : pickComplete ? 'partial' : 'pending'}
+          />
+        )}
+        <ScoreLine
+          label={context.type === 'bracket' ? 'Predicted winner won stage' : 'Result picked'}
+          value={settlement?.mode === 'settled' ? (settlement.breakdown.outcomeCorrect ? '+100' : '+0') : pickComplete ? '+100 possible' : 'pending'}
+          state={settlement?.mode === 'settled' ? settlement.breakdown.outcomeCorrect ? 'correct' : 'missed' : pickComplete ? 'correct' : 'pending'}
+        />
+        <ScoreLine
+          label="Exact score"
+          value={settlement?.mode === 'settled' ? (settlement.breakdown.exactCorrect ? '+40' : '+0') : pickComplete ? '+40 possible' : 'pending'}
+          state={settlement?.mode === 'settled' ? settlement.breakdown.exactCorrect ? 'correct' : 'missed' : pickComplete ? 'partial' : 'pending'}
+        />
+        <ScoreLine
+          label="Goal difference"
+          value={settlement?.mode === 'settled' ? (settlement.breakdown.goalDifferenceCorrect ? '+20' : '+0') : pickComplete ? '+20 possible' : 'pending'}
+          state={settlement?.mode === 'settled' ? settlement.breakdown.goalDifferenceCorrect ? 'correct' : 'missed' : pickComplete ? 'partial' : 'pending'}
+        />
         <ScoreLine label="Autosave" value={isSignedIn ? 'on' : 'sign in'} state="pending" />
       </div>
     </aside>
   )
 }
 
-function MvpMatchRail({ context, score }) {
+function MvpMatchRail({ context, score, settlement }) {
   const winner = score.homeScore === score.awayScore
     ? context.type === 'bracket'
       ? score.advancerTeam ? `${score.advancerTeam} advances after ET/pens` : 'Pick who advances after ET/pens'
@@ -1509,7 +2021,15 @@ function MvpMatchRail({ context, score }) {
           <strong>Current pick</strong>
           <p>{context.home} {score.homeScore}-{score.awayScore} {context.away}</p>
           <span>{winner}</span>
+          {settlement?.mode === 'settled' && <em className={`points-chip ${settlement.state}`}>{settlement.label}</em>}
         </article>
+        {settlement?.mode === 'settled' && (
+          <article className={`settled-result-tile ${settlement.state}`}>
+            <strong>Official result</strong>
+            <p>{settlement.result.homeTeam} {settlement.result.homeScore}-{settlement.result.awayScore} {settlement.result.awayTeam}</p>
+            <span>{settlement.points}/{settlement.total} points earned</span>
+          </article>
+        )}
         <article>
           <strong>League impact</strong>
           <p>Saved predictions will settle into private league and global leaderboards.</p>
@@ -1530,18 +2050,36 @@ function ScoreLine({ label, value, state }) {
   )
 }
 
+function resultMatchesContext(result, context) {
+  return Boolean(
+    result
+    && context
+    && result.homeTeam === context.home
+    && result.awayTeam === context.away,
+  )
+}
+
 function ResultsView({
   matchSequence,
+  fixtureRows,
   fixtureResults,
   awardResults,
+  fixtureLocks,
   onSaveFixtureResult,
+  onClearFixtureResult,
+  onToggleFixtureLock,
   onSaveAwardResult,
+  onClearAwardResult,
   resultStatus,
 }) {
   const [selectedFixtureId, setSelectedFixtureId] = useState(matchSequence[0]?.id ?? '')
   const selectedContext = matchSequence.find((match) => match.id === selectedFixtureId) ?? matchSequence[0]
-  const selectedResult = selectedContext ? fixtureResults[selectedContext.id] : null
+  const selectedStoredResult = selectedContext ? fixtureResults[selectedContext.id] : null
+  const selectedResult = resultMatchesContext(selectedStoredResult, selectedContext) ? selectedStoredResult : null
+  const selectedStaleResult = selectedStoredResult && !selectedResult ? selectedStoredResult : null
+  const selectedLock = selectedContext ? fixtureLocks[selectedContext.id] : null
   const settledFixtureCount = Object.keys(fixtureResults).length
+  const lockedFixtureCount = Object.keys(fixtureLocks).length
   const settledAwardCount = Object.keys(awardResults).length
 
   return (
@@ -1552,7 +2090,7 @@ function ResultsView({
             <p className="eyebrow">Admin settlement</p>
             <h2>Manual results fallback</h2>
           </div>
-          <span className="pill">{settledFixtureCount} matches settled</span>
+          <span className="pill">{settledFixtureCount} settled / {lockedFixtureCount} locked</span>
         </div>
         <div className="settlement-note">
           <strong>API-ready path</strong>
@@ -1565,18 +2103,27 @@ function ResultsView({
               <span>{matchSequence.length} available</span>
             </div>
             <div className="fixture-list">
-              {matchSequence.map((match) => {
-                const result = fixtureResults[match.id]
+              {fixtureRows.map((match) => {
+                const storedResult = fixtureResults[match.id]
+                const result = resultMatchesContext(storedResult, match) ? storedResult : null
+                const staleResult = storedResult && !result
+                const locked = fixtureLocks[match.id]
+                const isUnavailable = match.isReady === false
                 return (
                   <button
-                    className={selectedFixtureId === match.id ? 'selected' : ''}
+                    className={`${selectedFixtureId === match.id ? 'selected' : ''} ${locked ? 'locked-fixture' : ''} ${staleResult ? 'stale-fixture' : ''} ${isUnavailable ? 'unavailable-fixture' : ''}`}
+                    disabled={isUnavailable}
                     key={match.id}
-                    onClick={() => setSelectedFixtureId(match.id)}
+                    onClick={() => {
+                      if (!isUnavailable) setSelectedFixtureId(match.id)
+                    }}
+                    title={isUnavailable ? match.blockedReason : undefined}
                   >
                     <small>{match.stage}</small>
-                    <span><TeamFlag team={match.home} /> {meta(match.home).code}</span>
-                    <strong>{result ? `${result.homeScore}-${result.awayScore}` : 'unset'}</strong>
-                    <span><TeamFlag team={match.away} /> {meta(match.away).code}</span>
+                    <span>{match.home === 'TBD' ? 'TBD' : <><TeamFlag team={match.home} /> {meta(match.home).code}</>}</span>
+                    <strong>{isUnavailable ? 'waiting' : result ? `${result.homeScore}-${result.awayScore}` : staleResult ? 'stale' : 'unset'}</strong>
+                    <span>{match.away === 'TBD' ? 'TBD' : <><TeamFlag team={match.away} /> {meta(match.away).code}</>}</span>
+                    {(locked || staleResult || isUnavailable) && <em>{isUnavailable ? 'blocked' : staleResult ? 'needs reset' : 'locked'}</em>}
                   </button>
                 )
               })}
@@ -1584,11 +2131,15 @@ function ResultsView({
           </div>
           {selectedContext && (
             <FixtureResultEditor
-              key={`${selectedContext.id}-${selectedResult?.updatedAt ?? 'new'}`}
+              key={`${selectedContext.id}-${selectedContext.home}-${selectedContext.away}-${selectedResult?.updatedAt ?? 'new'}`}
               context={selectedContext}
               existingResult={selectedResult}
+              staleResult={selectedStaleResult}
+              existingLock={selectedLock}
               resultStatus={resultStatus}
               onSaveFixtureResult={onSaveFixtureResult}
+              onClearFixtureResult={onClearFixtureResult}
+              onToggleFixtureLock={onToggleFixtureLock}
             />
           )}
         </div>
@@ -1610,6 +2161,7 @@ function ResultsView({
               key={`${award.id}-${awardResults[award.id]?.updatedAt ?? 'new'}`}
               resultStatus={resultStatus}
               onSaveAwardResult={onSaveAwardResult}
+              onClearAwardResult={onClearAwardResult}
             />
           ))}
         </div>
@@ -1623,7 +2175,7 @@ function ResultsView({
   )
 }
 
-function FixtureResultEditor({ context, existingResult, resultStatus, onSaveFixtureResult }) {
+function FixtureResultEditor({ context, existingResult, staleResult, existingLock, resultStatus, onSaveFixtureResult, onClearFixtureResult, onToggleFixtureLock }) {
   const [fixtureDraft, setFixtureDraft] = useState({
     homeScore: existingResult?.homeScore ?? 0,
     awayScore: existingResult?.awayScore ?? 0,
@@ -1646,8 +2198,17 @@ function FixtureResultEditor({ context, existingResult, resultStatus, onSaveFixt
     <div className="result-editor">
       <div className="section-mini-head">
         <h3>{context.stage}</h3>
-        <span>{existingResult ? `Last saved ${new Date(existingResult.updatedAt).toLocaleString()}` : 'No final result yet'}</span>
+        <span>
+          {existingLock ? `Locked ${new Date(existingLock.lockedAt).toLocaleString()}` : 'Predictions open'}
+          {' - '}
+          {existingResult ? `Last saved ${new Date(existingResult.updatedAt).toLocaleString()}` : staleResult ? 'Saved result no longer matches this matchup' : 'No final result yet'}
+        </span>
       </div>
+      {staleResult && (
+        <p className="auth-message error">
+          Existing result is for {staleResult.homeTeam} {staleResult.homeScore}-{staleResult.awayScore} {staleResult.awayTeam}. Reset or save this fixture again for {context.home} vs {context.away}.
+        </p>
+      )}
       <div className="score-hero result-hero">
         <TeamBadge team={context.home} />
         <div className="score-center">
@@ -1693,17 +2254,35 @@ function FixtureResultEditor({ context, existingResult, resultStatus, onSaveFixt
       >
         <ClipboardCheck size={16} /> Save final result
       </button>
+      <div className="button-row result-actions">
+        <button
+          className="full-button secondary"
+          disabled={resultStatus.loading || (!existingResult && !staleResult)}
+          onClick={() => onClearFixtureResult(context)}
+        >
+          <X size={16} /> Reset to not played
+        </button>
+        <button
+          className="full-button secondary"
+          disabled={resultStatus.loading}
+          onClick={() => onToggleFixtureLock(context)}
+        >
+          {existingLock ? <CircleMinus size={16} /> : <ClipboardCheck size={16} />}
+          {existingLock ? 'Unlock picks' : 'Lock predictions'}
+        </button>
+      </div>
       {needsAdvancer && <p className="auth-message error">Choose who advanced before settling this knockout match.</p>}
     </div>
   )
 }
 
-function AwardResultCard({ award, existingResult, resultStatus, onSaveAwardResult }) {
+function AwardResultCard({ award, existingResult, resultStatus, onSaveAwardResult, onClearAwardResult }) {
   const [recipient, setRecipient] = useState(existingResult?.recipient ?? '')
   return (
     <article className="award-result-card">
       <strong>{award.label}</strong>
       <span>{award.points} pts</span>
+      {existingResult && <small>Official result: {existingResult.recipient}</small>}
       <input
         value={recipient}
         list={`award-result-${award.id}`}
@@ -1721,6 +2300,13 @@ function AwardResultCard({ award, existingResult, resultStatus, onSaveAwardResul
         onClick={() => onSaveAwardResult(award, recipient.trim())}
       >
         Save award
+      </button>
+      <button
+        className="full-button secondary danger-lite"
+        disabled={resultStatus.loading || !existingResult}
+        onClick={() => onClearAwardResult(award)}
+      >
+        Reset award
       </button>
     </article>
   )
@@ -1970,7 +2556,7 @@ function LeagueActivity({ league }) {
   )
 }
 
-function MemberPredictionModal({ member, matchSequence, onClose }) {
+function MemberPredictionModal({ member, scoringMode, matchSequence, fixtureResults, awardResults, onClose }) {
   const directPredictions = member.predictions ?? []
   const activityPredictions = predictionsFromActivity(member, matchSequence)
   const predictionMap = new Map(activityPredictions.map((prediction) => [prediction.fixtureId, prediction]))
@@ -1981,6 +2567,10 @@ function MemberPredictionModal({ member, matchSequence, onClose }) {
   const bracketStages = bracketPredictionsByStage(predictions)
   const hasGroupPredictions = predictions.some((prediction) => prediction.fixtureType === 'group')
   const hasBracketPredictions = predictions.some((prediction) => prediction.fixtureType === 'bracket')
+  const settledPredictions = predictions
+    .map((prediction) => ({ prediction, settlement: settlementForPredictionView(prediction, fixtureResults) }))
+    .filter((row) => row.settlement.mode === 'settled')
+  const isSettled = scoringMode === 'settled'
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true">
       <div className="panel member-modal">
@@ -2002,7 +2592,7 @@ function MemberPredictionModal({ member, matchSequence, onClose }) {
           </div>
           <div>
             <strong>{member.points ?? 0}</strong>
-            <span>draft pts</span>
+            <span>{isSettled ? 'pts' : 'draft pts'}</span>
           </div>
         </div>
         <div className="member-pick-sections">
@@ -2013,20 +2603,36 @@ function MemberPredictionModal({ member, matchSequence, onClose }) {
             </div>
             {!hasGroupPredictions && <p className="empty-state">No group-stage predictions saved yet.</p>}
             {hasGroupPredictions && (
-              <div className="mini-group-grid">
-                {groups.map((group) => (
-                  <article className="mini-group-card" key={group.id}>
-                    <strong>Group {group.id}</strong>
-                    {groupStandings[group.id].map((row, index) => (
-                      <div className="mini-rank-row" key={row.team}>
-                        <span>{index + 1}</span>
-                        <TeamFlag team={row.team} />
-                        <b>{row.pts}</b>
-                      </div>
-                    ))}
-                  </article>
-                ))}
-              </div>
+              <>
+                <div className="mini-group-grid">
+                  {groups.map((group) => (
+                    <article className="mini-group-card" key={group.id}>
+                      <strong>Group {group.id}</strong>
+                      {groupStandings[group.id].map((row, index) => (
+                        <div className="mini-rank-row" key={row.team}>
+                          <span>{index + 1}</span>
+                          <TeamFlag team={row.team} />
+                          <b>{row.pts}</b>
+                        </div>
+                      ))}
+                    </article>
+                  ))}
+                </div>
+                {settledPredictions.some(({ prediction }) => prediction.fixtureType === 'group') && (
+                  <div className="mini-settlement-list">
+                    {settledPredictions
+                      .filter(({ prediction }) => prediction.fixtureType === 'group')
+                      .map(({ prediction, settlement }) => (
+                        <div className={`mini-settlement-card ${settlement.state}`} key={prediction.id}>
+                          <TeamFlag team={prediction.homeTeam} />
+                          <strong>{prediction.predictedHomeScore}-{prediction.predictedAwayScore}</strong>
+                          <TeamFlag team={prediction.awayTeam} />
+                          <span>{settlement.label}</span>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </>
             )}
           </section>
           <section>
@@ -2041,16 +2647,19 @@ function MemberPredictionModal({ member, matchSequence, onClose }) {
                   <div className="mini-bracket-stage" key={stage}>
                     <strong>{stage}</strong>
                     {stagePredictions.length === 0 && <span className="mini-empty">TBD</span>}
-                    {stagePredictions.map((prediction) => (
-                      <div className="mini-bracket-card" key={prediction.id} title={scoreKey(prediction)}>
+                    {stagePredictions.map((prediction) => {
+                      const settlement = settlementForPredictionView(prediction, fixtureResults)
+                      return (
+                      <div className={`mini-bracket-card ${settlement.mode === 'settled' ? `settled ${settlement.state}` : ''}`} key={prediction.id} title={scoreKey(prediction)}>
                         <TeamFlag team={prediction.homeTeam} />
                         <b>{prediction.predictedHomeScore}</b>
                         <span>-</span>
                         <b>{prediction.predictedAwayScore}</b>
                         <TeamFlag team={prediction.awayTeam} />
-                        {prediction.advancingTeam && <small>{meta(prediction.advancingTeam).code}</small>}
+                        <small>{settlement.mode === 'settled' ? settlement.label : prediction.advancingTeam ? `${meta(prediction.advancingTeam).code} advances` : 'Pending'}</small>
                       </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 ))}
               </div>
@@ -2064,12 +2673,17 @@ function MemberPredictionModal({ member, matchSequence, onClose }) {
             {awardRows.length === 0 && <p className="empty-state">No award picks saved yet.</p>}
             {awardRows.length > 0 && (
               <div className="mini-awards-grid">
-                {awardRows.map((awardPick) => (
-                  <div key={awardPick.awardKey}>
+                {awardRows.map((awardPick) => {
+                  const award = awards.find((item) => item.id === awardPick.awardKey) ?? { id: awardPick.awardKey, points: 0 }
+                  const settlement = awardSettlementView(award, awardPick, awardResults)
+                  return (
+                  <div className={settlement.mode === 'settled' ? `settled ${settlement.state}` : ''} key={awardPick.awardKey}>
                     <strong>{awardPick.awardLabel}</strong>
                     <span>{awardPick.recipient}</span>
+                    <small>{settlement.mode === 'settled' ? settlement.label : 'Pending'}</small>
                   </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </section>
@@ -2079,7 +2693,7 @@ function MemberPredictionModal({ member, matchSequence, onClose }) {
   )
 }
 
-function AwardsView({ selectedAward, setSelectedAward, awardPicks, onSaveAwardPick, awardSaveStatus, isSignedIn, isLocked, lockLabel }) {
+function AwardsView({ selectedAward, setSelectedAward, awardPicks, awardResults, onSaveAwardPick, awardSaveStatus, isSignedIn, isLocked, lockLabel }) {
   const [awardQuery, setAwardQuery] = useState('')
   const activeAward = awards.find((award) => award.id === selectedAward) ?? awards[0]
   const searchMeta = awardSearchMeta[activeAward.id] ?? awardSearchMeta.potm
@@ -2128,11 +2742,15 @@ function AwardsView({ selectedAward, setSelectedAward, awardPicks, onSaveAwardPi
         </div>
         <div className="award-grid">
           {awards.map((award) => (
-            <button className={`award-card ${selectedAward === award.id ? 'selected' : ''}`} key={award.id} onClick={() => setSelectedAward(award.id)}>
+            <button
+              className={`award-card ${selectedAward === award.id ? 'selected' : ''} ${awardSettlementView(award, awardPicks[award.id], awardResults).mode === 'settled' ? `settled ${awardSettlementView(award, awardPicks[award.id], awardResults).state}` : ''}`}
+              key={award.id}
+              onClick={() => setSelectedAward(award.id)}
+            >
               <Medal size={18} />
               <span>{award.label}</span>
               <strong>{awardPicks[award.id]?.recipient ?? 'No pick yet'}</strong>
-              <small>{award.points} pts - {awardPicks[award.id] ? 'saved' : 'open'}</small>
+              <small>{awardResults[award.id] ? `${awardSettlementView(award, awardPicks[award.id], awardResults).label} - ${awardSettlementView(award, awardPicks[award.id], awardResults).detail}` : `${award.points} pts - ${awardPicks[award.id] ? 'saved' : 'open'}`}</small>
             </button>
           ))}
         </div>

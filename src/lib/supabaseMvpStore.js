@@ -34,7 +34,8 @@ function summarizePrediction(prediction) {
   return prediction.advancingTeam ? `${score}, ${prediction.advancingTeam} advances` : score
 }
 
-const MATCH_DRAFT_POINTS = 160
+const GROUP_DRAFT_POINTS = 160
+const KNOCKOUT_DRAFT_POINTS = 260
 const AWARD_DRAFT_POINTS = {
   potm: 160,
   boot: 120,
@@ -44,6 +45,7 @@ const AWARD_DRAFT_POINTS = {
 
 const RESULT_POINTS = {
   outcome: 100,
+  participant: 50,
   exact: 40,
   goalDifference: 20,
 }
@@ -53,7 +55,8 @@ function draftPointsForPrediction(prediction) {
     prediction.fixture_type === 'bracket'
     && prediction.predicted_home_score === prediction.predicted_away_score
     && !prediction.advancing_team
-  return isKnockoutTieWithoutAdvancer ? 0 : MATCH_DRAFT_POINTS
+  if (isKnockoutTieWithoutAdvancer) return 0
+  return prediction.fixture_type === 'bracket' ? KNOCKOUT_DRAFT_POINTS : GROUP_DRAFT_POINTS
 }
 
 function draftPointsForAward(awardPick) {
@@ -135,6 +138,19 @@ function awardResultFromRow(row) {
   }
 }
 
+function fixtureLockFromRow(row) {
+  return {
+    fixtureKey: row.fixture_key,
+    fixtureType: row.fixture_type,
+    stage: row.stage,
+    homeTeam: row.home_team,
+    awayTeam: row.away_team,
+    lockedAt: row.locked_at,
+    source: row.source,
+    updatedAt: row.updated_at,
+  }
+}
+
 function activityFromRow(item) {
   return {
     id: item.id,
@@ -155,6 +171,7 @@ function isMissingResultTableError(error) {
   return ['42P01', 'PGRST205'].includes(error?.code)
     || message.includes('mvp_fixture_results')
     || message.includes('mvp_award_results')
+    || message.includes('mvp_fixture_locks')
 }
 
 function outcomeFor(homeScore, awayScore, homeTeam, awayTeam, advancingTeam, fixtureType) {
@@ -163,8 +180,91 @@ function outcomeFor(homeScore, awayScore, homeTeam, awayTeam, advancingTeam, fix
   return homeScore > awayScore ? homeTeam : awayTeam
 }
 
-function settlementForPrediction(prediction, result) {
-  if (!result) return { points: draftPointsForPrediction(prediction), mode: 'draft' }
+function resultOutcome(result) {
+  if (!result) return null
+  return outcomeFor(
+    result.home_score,
+    result.away_score,
+    result.home_team,
+    result.away_team,
+    result.advancing_team,
+    result.fixture_type,
+  )
+}
+
+function resultTeams(result) {
+  return result ? [result.home_team, result.away_team] : []
+}
+
+function scorePairForTeam(record, team, homeKey, awayKey) {
+  if (!record || !team) return null
+  if (record.home_team === team) return { teamScore: record[homeKey], opponentScore: record[awayKey] }
+  if (record.away_team === team) return { teamScore: record[awayKey], opponentScore: record[homeKey] }
+  return null
+}
+
+function sameOrderedFixture(prediction, result) {
+  return Boolean(
+    result
+    && prediction.fixture_key === result.fixture_key
+    && prediction.home_team === result.home_team
+    && prediction.away_team === result.away_team,
+  )
+}
+
+function knockoutSettlementForPrediction(prediction, fixtureResults, useDraftFallback = true) {
+  const stageResults = fixtureResults.filter((result) => (
+    result.fixture_type === 'bracket' && result.stage === prediction.stage
+  ))
+  if (!stageResults.length) return { points: useDraftFallback ? draftPointsForPrediction(prediction) : 0, mode: 'draft' }
+  const predictedWinner = outcomeFor(
+    prediction.predicted_home_score,
+    prediction.predicted_away_score,
+    prediction.home_team,
+    prediction.away_team,
+    prediction.advancing_team,
+    prediction.fixture_type,
+  )
+  const predictedOtherTeam = predictedWinner === prediction.home_team ? prediction.away_team : prediction.home_team
+  const winnerResult = stageResults.find((result) => resultOutcome(result) === predictedWinner)
+  const winnerAppearanceResult = stageResults.find((result) => resultTeams(result).includes(predictedWinner))
+  const otherAppearanceResult = stageResults.find((result) => resultTeams(result).includes(predictedOtherTeam))
+  const winnerCorrect = Boolean(winnerResult)
+  const winnerParticipantCorrect = Boolean(winnerAppearanceResult)
+  const participantCorrect = Boolean(otherAppearanceResult)
+  const comparisonTeam = winnerCorrect || winnerAppearanceResult
+    ? predictedWinner
+    : participantCorrect
+      ? predictedOtherTeam
+      : null
+  const comparisonResult = winnerResult ?? winnerAppearanceResult ?? otherAppearanceResult ?? null
+  const predictionPair = scorePairForTeam(prediction, comparisonTeam, 'predicted_home_score', 'predicted_away_score')
+  const resultPair = scorePairForTeam(comparisonResult, comparisonTeam, 'home_score', 'away_score')
+  const canScoreScore = Boolean(predictionPair && resultPair)
+  const exactCorrect = canScoreScore
+    && predictionPair.teamScore === resultPair.teamScore
+    && predictionPair.opponentScore === resultPair.opponentScore
+  const goalDifferenceCorrect = canScoreScore
+    && predictionPair.teamScore - predictionPair.opponentScore === resultPair.teamScore - resultPair.opponentScore
+  const points =
+    (winnerParticipantCorrect ? RESULT_POINTS.participant : 0)
+    + (participantCorrect ? RESULT_POINTS.participant : 0)
+    + (winnerCorrect ? RESULT_POINTS.outcome : 0)
+    + (exactCorrect ? RESULT_POINTS.exact : 0)
+    + (goalDifferenceCorrect ? RESULT_POINTS.goalDifference : 0)
+  return {
+    points,
+    mode: 'settled',
+    breakdown: { winnerParticipantCorrect, participantCorrect, outcomeCorrect: winnerCorrect, exactCorrect, goalDifferenceCorrect },
+  }
+}
+
+function settlementForPrediction(prediction, fixtureResultByKey, fixtureResults, useDraftFallback = true) {
+  if (prediction.fixture_type === 'bracket') {
+    return knockoutSettlementForPrediction(prediction, fixtureResults, useDraftFallback)
+  }
+  const result = fixtureResultByKey[prediction.fixture_key]
+  if (!result) return { points: useDraftFallback ? draftPointsForPrediction(prediction) : 0, mode: 'draft' }
   const predictionOutcome = outcomeFor(
     prediction.predicted_home_score,
     prediction.predicted_away_score,
@@ -173,18 +273,14 @@ function settlementForPrediction(prediction, result) {
     prediction.advancing_team,
     prediction.fixture_type,
   )
-  const resultOutcome = outcomeFor(
-    result.home_score,
-    result.away_score,
-    result.home_team,
-    result.away_team,
-    result.advancing_team,
-    result.fixture_type,
-  )
-  const outcomeCorrect = predictionOutcome && resultOutcome && predictionOutcome === resultOutcome
-  const exactCorrect = prediction.predicted_home_score === result.home_score
+  const actualOutcome = resultOutcome(result)
+  const outcomeCorrect = predictionOutcome && actualOutcome && predictionOutcome === actualOutcome
+  const canScoreExact = sameOrderedFixture(prediction, result)
+  const exactCorrect = canScoreExact
+    && prediction.predicted_home_score === result.home_score
     && prediction.predicted_away_score === result.away_score
-  const goalDifferenceCorrect =
+  const goalDifferenceCorrect = canScoreExact
+    &&
     prediction.predicted_home_score - prediction.predicted_away_score === result.home_score - result.away_score
   const points =
     (outcomeCorrect ? RESULT_POINTS.outcome : 0)
@@ -197,8 +293,8 @@ function settlementForPrediction(prediction, result) {
   }
 }
 
-function settlementForAward(awardPick, result) {
-  if (!result) return { points: draftPointsForAward(awardPick), mode: 'draft' }
+function settlementForAward(awardPick, result, useDraftFallback = true) {
+  if (!result) return { points: useDraftFallback ? draftPointsForAward(awardPick) : 0, mode: 'draft' }
   const correct = normalizeText(awardPick.recipient) === normalizeText(result.recipient)
   return { points: correct ? draftPointsForAward(awardPick) : 0, mode: 'settled', breakdown: { correct } }
 }
@@ -208,6 +304,7 @@ function leagueFromRows(league, members = [], activity = [], predictions = [], a
   const fixtureResultByKey = Object.fromEntries(fixtureResults.map((result) => [result.fixture_key, result]))
   const awardResultByKey = Object.fromEntries(awardResults.map((result) => [result.award_key, result]))
   const hasSettledResults = fixtureResults.length > 0 || awardResults.length > 0
+  const useDraftFallback = !hasSettledResults
   const rawActivityStats = activity.reduce((stats, item) => {
     if (item.activity_type !== 'prediction_saved' || !item.actor_id) return stats
     const summary = String(item.metadata?.summary ?? '')
@@ -234,14 +331,14 @@ function leagueFromRows(league, members = [], activity = [], predictions = [], a
         {
           predictionCount,
           lastSavedAt: stats.lastSavedAt,
-          points: predictionCount * MATCH_DRAFT_POINTS,
+          points: predictionCount * GROUP_DRAFT_POINTS,
         },
       ]
     }),
   )
   const predictionStats = predictions.reduce((stats, prediction) => {
     const current = stats[prediction.user_id] ?? { predictionCount: 0, settledCount: 0, lastSavedAt: null, points: 0 }
-    const settlement = settlementForPrediction(prediction, fixtureResultByKey[prediction.fixture_key])
+    const settlement = settlementForPrediction(prediction, fixtureResultByKey, fixtureResults, useDraftFallback)
     stats[prediction.user_id] = {
       predictionCount: current.predictionCount + 1,
       settledCount: current.settledCount + (settlement.mode === 'settled' ? 1 : 0),
@@ -252,7 +349,7 @@ function leagueFromRows(league, members = [], activity = [], predictions = [], a
   }, {})
   const awardStats = awardPicks.reduce((stats, awardPick) => {
     const current = stats[awardPick.user_id] ?? { awardCount: 0, settledCount: 0, lastSavedAt: null, points: 0 }
-    const settlement = settlementForAward(awardPick, awardResultByKey[awardPick.award_key])
+    const settlement = settlementForAward(awardPick, awardResultByKey[awardPick.award_key], useDraftFallback)
     stats[awardPick.user_id] = {
       awardCount: current.awardCount + 1,
       settledCount: current.settledCount + (settlement.mode === 'settled' ? 1 : 0),
@@ -269,30 +366,35 @@ function leagueFromRows(league, members = [], activity = [], predictions = [], a
     scoringMode: hasSettledResults ? 'settled' : 'draft',
     settledFixtureCount: fixtureResults.length,
     settledAwardCount: awardResults.length,
-    members: members.map((member) => ({
-      id: member.user_id,
-      displayName: member.profiles?.display_name ?? 'Member',
-      role: member.role,
-      points: (predictionStats[member.user_id]?.points ?? activityStats[member.user_id]?.points ?? 0) + (awardStats[member.user_id]?.points ?? 0),
-      predictionCount: predictionStats[member.user_id]?.predictionCount ?? activityStats[member.user_id]?.predictionCount ?? 0,
-      settledPredictionCount: predictionStats[member.user_id]?.settledCount ?? 0,
-      awardCount: awardStats[member.user_id]?.awardCount ?? 0,
-      settledAwardCount: awardStats[member.user_id]?.settledCount ?? 0,
-      predictions: predictions
-        .filter((prediction) => prediction.user_id === member.user_id)
-        .map(predictionFromRow),
-      awardPicks: awardPicks
-        .filter((awardPick) => awardPick.user_id === member.user_id)
-        .map(awardPickFromRow),
-      activity: activity
-        .filter((item) => item.actor_id === member.user_id)
-        .map(activityFromRow),
-      lastSavedAt: [
-        predictionStats[member.user_id]?.lastSavedAt,
-        activityStats[member.user_id]?.lastSavedAt,
-        awardStats[member.user_id]?.lastSavedAt,
-      ].filter(Boolean).sort().at(-1) ?? null,
-    })),
+    members: members.map((member) => {
+      const predictionPoints = hasSettledResults
+        ? predictionStats[member.user_id]?.points ?? 0
+        : predictionStats[member.user_id]?.points ?? activityStats[member.user_id]?.points ?? 0
+      return {
+        id: member.user_id,
+        displayName: member.profiles?.display_name ?? 'Member',
+        role: member.role,
+        points: predictionPoints + (awardStats[member.user_id]?.points ?? 0),
+        predictionCount: predictionStats[member.user_id]?.predictionCount ?? activityStats[member.user_id]?.predictionCount ?? 0,
+        settledPredictionCount: predictionStats[member.user_id]?.settledCount ?? 0,
+        awardCount: awardStats[member.user_id]?.awardCount ?? 0,
+        settledAwardCount: awardStats[member.user_id]?.settledCount ?? 0,
+        predictions: predictions
+          .filter((prediction) => prediction.user_id === member.user_id)
+          .map(predictionFromRow),
+        awardPicks: awardPicks
+          .filter((awardPick) => awardPick.user_id === member.user_id)
+          .map(awardPickFromRow),
+        activity: activity
+          .filter((item) => item.actor_id === member.user_id)
+          .map(activityFromRow),
+        lastSavedAt: [
+          predictionStats[member.user_id]?.lastSavedAt,
+          activityStats[member.user_id]?.lastSavedAt,
+          awardStats[member.user_id]?.lastSavedAt,
+        ].filter(Boolean).sort().at(-1) ?? null,
+      }
+    }),
     activity: activity.map(activityFromRow),
   }
 }
@@ -477,18 +579,25 @@ export const supabaseMvpStore = {
 
   async loadResults() {
     const client = await requireClient()
-    const [{ data: fixtureRows, error: fixtureError }, { data: awardRows, error: awardError }] = await Promise.all([
+    const [
+      { data: fixtureRows, error: fixtureError },
+      { data: awardRows, error: awardError },
+      { data: lockRows, error: lockError },
+    ] = await Promise.all([
       client.from('mvp_fixture_results').select('*').order('updated_at', { ascending: false }),
       client.from('mvp_award_results').select('*').order('updated_at', { ascending: false }),
+      client.from('mvp_fixture_locks').select('*').order('updated_at', { ascending: false }),
     ])
-    if (isMissingResultTableError(fixtureError) || isMissingResultTableError(awardError)) {
-      return { fixtures: {}, awards: {} }
+    if (isMissingResultTableError(fixtureError) || isMissingResultTableError(awardError) || isMissingResultTableError(lockError)) {
+      return { fixtures: {}, awards: {}, locks: {} }
     }
     if (fixtureError) throw fixtureError
     if (awardError) throw awardError
+    if (lockError) throw lockError
     return {
       fixtures: Object.fromEntries(fixtureRows.map((row) => [row.fixture_key, fixtureResultFromRow(row)])),
       awards: Object.fromEntries(awardRows.map((row) => [row.award_key, awardResultFromRow(row)])),
+      locks: Object.fromEntries(lockRows.map((row) => [row.fixture_key, fixtureLockFromRow(row)])),
     }
   },
 
@@ -523,6 +632,43 @@ export const supabaseMvpStore = {
     return fixtureResultFromRow(data)
   },
 
+  async clearFixtureResult(context) {
+    const client = await requireClient()
+    const { error } = await client
+      .from('mvp_fixture_results')
+      .delete()
+      .eq('fixture_key', context.id)
+    if (error) throw error
+  },
+
+  async lockFixture(context) {
+    const client = await requireClient()
+    const { data, error } = await client
+      .from('mvp_fixture_locks')
+      .upsert({
+        fixture_key: context.id,
+        fixture_type: context.type,
+        stage: context.stage,
+        home_team: context.home,
+        away_team: context.away,
+        source: 'manual',
+        locked_at: new Date().toISOString(),
+      }, { onConflict: 'fixture_key' })
+      .select()
+      .single()
+    if (error) throw error
+    return fixtureLockFromRow(data)
+  },
+
+  async unlockFixture(context) {
+    const client = await requireClient()
+    const { error } = await client
+      .from('mvp_fixture_locks')
+      .delete()
+      .eq('fixture_key', context.id)
+    if (error) throw error
+  },
+
   async saveAwardResult({ award, recipient }) {
     const client = await requireClient()
     const { data, error } = await client
@@ -538,6 +684,15 @@ export const supabaseMvpStore = {
       .single()
     if (error) throw error
     return awardResultFromRow(data)
+  },
+
+  async clearAwardResult(award) {
+    const client = await requireClient()
+    const { error } = await client
+      .from('mvp_award_results')
+      .delete()
+      .eq('award_key', award.id)
+    if (error) throw error
   },
 
   async createLeague(name, profile, user) {
@@ -600,6 +755,13 @@ export const supabaseMvpStore = {
 
   async savePrediction({ profile, context, score, locked, league }) {
     const client = await requireClient()
+    const { data: fixtureLock, error: fixtureLockError } = await client
+      .from('mvp_fixture_locks')
+      .select('fixture_key')
+      .eq('fixture_key', context.id)
+      .maybeSingle()
+    if (fixtureLockError && !isMissingResultTableError(fixtureLockError)) throw fixtureLockError
+    if (fixtureLock) throw new Error('This match is locked. Picks can no longer be changed.')
     const { data, error } = await client
       .from('mvp_prediction_drafts')
       .upsert(predictionRow({ profile, context, score, locked }), { onConflict: 'user_id,fixture_key' })
@@ -622,6 +784,13 @@ export const supabaseMvpStore = {
   async savePredictions({ profile, items, locked = false, league }) {
     if (!items.length) return []
     const client = await requireClient()
+    const fixtureKeys = items.map((item) => item.context.id)
+    const { data: lockRows, error: lockError } = await client
+      .from('mvp_fixture_locks')
+      .select('fixture_key')
+      .in('fixture_key', fixtureKeys)
+    if (lockError && !isMissingResultTableError(lockError)) throw lockError
+    if (lockRows?.length) throw new Error('Some matches are locked. Locked picks were not changed.')
     const rows = items.map((item) => predictionRow({ profile, context: item.context, score: item.score, locked }))
     const { data, error } = await client
       .from('mvp_prediction_drafts')

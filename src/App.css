@@ -393,6 +393,7 @@ h3 {
 .app-shell.dark .score-line,
 .app-shell.dark .mvp-grid article,
 .app-shell.dark .recipient-panel,
+.app-shell.dark .official-result-card,
 .app-shell.dark .points-stack .score-line {
   background: #111c18;
   border-color: #2e4037;
@@ -488,6 +489,55 @@ h3 {
 .app-shell.dark .mini-bracket-card {
   background: #14201b;
   border-color: #33453b;
+}
+
+.app-shell.dark .settlement-summary.correct,
+.app-shell.dark .official-result-card.correct,
+.app-shell.dark .settled-result-tile.correct,
+.app-shell.dark .group-match.settled.correct,
+.app-shell.dark .match-card.settled.correct,
+.app-shell.dark .mini-bracket-card.settled.correct,
+.app-shell.dark .mini-settlement-card.correct,
+.app-shell.dark .award-card.settled.correct,
+.app-shell.dark .mini-awards-grid div.settled.correct {
+  background: rgba(15, 143, 79, 0.18);
+  border-color: rgba(55, 226, 127, 0.56);
+}
+
+.app-shell.dark .settlement-summary.partial,
+.app-shell.dark .official-result-card.partial,
+.app-shell.dark .settled-result-tile.partial,
+.app-shell.dark .group-match.settled.partial,
+.app-shell.dark .match-card.settled.partial,
+.app-shell.dark .mini-bracket-card.settled.partial,
+.app-shell.dark .mini-settlement-card.partial {
+  background: rgba(167, 106, 0, 0.2);
+  border-color: rgba(241, 201, 74, 0.5);
+}
+
+.app-shell.dark .settlement-summary.missed,
+.app-shell.dark .official-result-card.missed,
+.app-shell.dark .settled-result-tile.missed,
+.app-shell.dark .group-match.settled.missed,
+.app-shell.dark .match-card.settled.missed,
+.app-shell.dark .mini-bracket-card.settled.missed,
+.app-shell.dark .mini-settlement-card.missed,
+.app-shell.dark .award-card.settled.missed,
+.app-shell.dark .mini-awards-grid div.settled.missed {
+  background: rgba(93, 38, 34, 0.42);
+  border-color: rgba(236, 111, 99, 0.5);
+}
+
+.app-shell.dark .match-card .settlement-detail,
+.app-shell.dark .group-match .settlement-detail,
+.app-shell.dark .official-result-card span,
+.app-shell.dark .official-result-card small,
+.app-shell.dark .mini-awards-grid small {
+  color: #a8bbb1;
+}
+
+.app-shell.dark .official-result-card strong {
+  color: #f7fff9;
 }
 
 .status-strip div {
@@ -894,6 +944,23 @@ h3 {
   flex: 0 0 auto;
 }
 
+.match-team.recognized {
+  color: #0f8f4f;
+}
+
+.match-team.recognized .team-badge,
+.match-team.recognized strong,
+.match-team.recognized svg {
+  color: #0f8f4f;
+}
+
+.app-shell.dark .match-team.recognized,
+.app-shell.dark .match-team.recognized .team-badge,
+.app-shell.dark .match-team.recognized strong,
+.app-shell.dark .match-team.recognized svg {
+  color: #32d17d;
+}
+
 .match-team.muted {
   color: #99a39d;
 }
@@ -909,6 +976,19 @@ h3 {
 
 .match-card.pending .match-state {
   color: #d94b3e;
+  font-weight: 850;
+}
+
+.match-card .settlement-detail {
+  position: absolute;
+  left: 10px;
+  bottom: 8px;
+  color: #647067;
+}
+
+.match-card.settled .match-state {
+  right: 10px;
+  color: inherit;
   font-weight: 850;
 }
 
@@ -974,6 +1054,37 @@ h3 {
 
 .score-hero > .team-badge:last-child {
   justify-content: flex-end;
+}
+
+.official-result-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 0.42fr);
+  gap: 10px;
+  border: 1px solid #dce6df;
+  border-radius: 8px;
+  background: #fbfdfc;
+  padding: 12px;
+}
+
+.official-result-card div {
+  display: grid;
+  gap: 4px;
+}
+
+.official-result-card span {
+  color: #647067;
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.official-result-card strong {
+  color: #17211b;
+  font-size: 18px;
+}
+
+.official-result-card small {
+  color: #647067;
 }
 
 .score-center {
@@ -1142,6 +1253,85 @@ h3 {
 .score-line.missed strong,
 .score-line.missed svg {
   color: #d94b3e;
+}
+
+.settlement-summary,
+.settlement-detail,
+.points-chip {
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.settlement-summary {
+  display: grid;
+  gap: 2px;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.settlement-summary.correct,
+.official-result-card.correct,
+.settled-result-tile.correct,
+.group-match.settled.correct,
+.match-card.settled.correct,
+.mini-bracket-card.settled.correct,
+.mini-settlement-card.correct,
+.award-card.settled.correct,
+.mini-awards-grid div.settled.correct {
+  border-color: rgba(15, 143, 79, 0.62);
+  background: #eef9f2;
+}
+
+.settlement-summary.partial,
+.official-result-card.partial,
+.settled-result-tile.partial,
+.group-match.settled.partial,
+.match-card.settled.partial,
+.mini-bracket-card.settled.partial,
+.mini-settlement-card.partial {
+  border-color: rgba(167, 106, 0, 0.52);
+  background: #fff8e5;
+}
+
+.settlement-summary.missed,
+.official-result-card.missed,
+.settled-result-tile.missed,
+.group-match.settled.missed,
+.match-card.settled.missed,
+.mini-bracket-card.settled.missed,
+.mini-settlement-card.missed,
+.award-card.settled.missed,
+.mini-awards-grid div.settled.missed {
+  border-color: rgba(217, 75, 62, 0.56);
+  background: #fff0ee;
+}
+
+.settlement-summary.correct strong,
+.points-chip.correct,
+.mini-settlement-card.correct span {
+  color: #0f8f4f;
+}
+
+.settlement-summary.partial strong,
+.points-chip.partial,
+.mini-settlement-card.partial span {
+  color: #a76a00;
+}
+
+.settlement-summary.missed strong,
+.points-chip.missed,
+.mini-settlement-card.missed span {
+  color: #d94b3e;
+}
+
+.points-chip {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 6px;
+  padding: 4px 8px;
+  background: #f5f8f6;
+  font-style: normal;
 }
 
 .event-list {
@@ -1509,6 +1699,27 @@ h3 {
 .group-match.draw-pick .pick-status {
   background: #eef9f2;
   color: #0f8f4f;
+}
+
+.group-match .settlement-detail {
+  grid-column: 1 / -1;
+  color: #647067;
+}
+
+.group-match.settled.correct .pick-status,
+.award-card.settled.correct small,
+.mini-awards-grid div.settled.correct small {
+  color: #0f8f4f;
+}
+
+.group-match.settled.partial .pick-status {
+  color: #a76a00;
+}
+
+.group-match.settled.missed .pick-status,
+.award-card.settled.missed small,
+.mini-awards-grid div.settled.missed small {
+  color: #d94b3e;
 }
 
 .group-match:hover {
@@ -2121,6 +2332,29 @@ h3 {
   font-weight: 850;
 }
 
+.mini-settlement-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.mini-settlement-card {
+  display: grid;
+  grid-template-columns: 24px auto 24px 1fr;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #e1eae4;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 8px;
+}
+
+.mini-settlement-card span {
+  justify-self: end;
+  font-size: 11px;
+  font-weight: 850;
+}
+
 .mini-awards-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2130,6 +2364,12 @@ h3 {
 .mini-awards-grid div {
   display: grid;
   gap: 5px;
+}
+
+.mini-awards-grid small {
+  color: #647067;
+  font-size: 11px;
+  font-weight: 850;
 }
 
 .readiness-grid {
@@ -2247,7 +2487,7 @@ h3 {
 
 .fixture-list button {
   display: grid;
-  grid-template-columns: 70px 1fr 48px 1fr;
+  grid-template-columns: 70px 1fr 48px 1fr auto;
   align-items: center;
   gap: 8px;
   border: 1px solid #dce6df;
@@ -2261,6 +2501,33 @@ h3 {
 .fixture-list button.selected {
   border-color: #0f8f4f;
   box-shadow: 0 0 0 2px rgba(15, 143, 79, 0.12);
+}
+
+.fixture-list button.locked-fixture {
+  border-color: rgba(167, 106, 0, 0.42);
+  background: #fff8e5;
+}
+
+.fixture-list button.stale-fixture {
+  border-color: rgba(217, 75, 62, 0.44);
+  background: #fff0ee;
+}
+
+.fixture-list button.unavailable-fixture {
+  cursor: not-allowed;
+  opacity: 0.68;
+  border-style: dashed;
+  background: #f7faf8;
+}
+
+.app-shell.dark .fixture-list button.stale-fixture {
+  border-color: rgba(236, 111, 99, 0.52);
+  background: rgba(93, 38, 34, 0.34);
+}
+
+.app-shell.dark .fixture-list button.unavailable-fixture {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.18);
 }
 
 .fixture-list small {
@@ -2277,6 +2544,36 @@ h3 {
 
 .fixture-list strong {
   text-align: center;
+}
+
+.fixture-list em {
+  border-radius: 999px;
+  background: #fff0c5;
+  color: #8a6500;
+  padding: 3px 7px;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.fixture-list button.stale-fixture em {
+  background: #ffe0dc;
+  color: #d94b3e;
+}
+
+.fixture-list button.unavailable-fixture em {
+  background: #e8eee9;
+  color: #647067;
+}
+
+.result-actions .full-button {
+  margin-top: 0;
+}
+
+.danger-lite {
+  border-color: rgba(217, 75, 62, 0.34);
+  color: #d94b3e;
 }
 
 .result-hero {
