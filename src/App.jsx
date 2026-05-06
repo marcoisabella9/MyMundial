@@ -334,13 +334,14 @@ async function createLeagueInviteImage({ league, inviteUrl, hostName, memberCoun
   context.fillStyle = '#b9ffd5'
   context.font = '800 42px Arial'
   context.fillText(`${hostName} invited you.`, 116, 530)
+
   context.fillStyle = '#effff5'
-  context.font = '900 58px Arial'
-  wrapCanvasText(context, '8 spots. 1 champion. No casuals.', 116, 650, width - 232, 66)
+  context.font = '900 68px Arial'
+  const tauntBottom = wrapCanvasText(context, taunt, 116, 650, width - 232, 76)
 
   context.fillStyle = '#d8efe2'
-  context.font = '700 38px Arial'
-  wrapCanvasText(context, taunt, 116, 808, width - 232, 48)
+  context.font = '700 32px Arial'
+  context.fillText('Private league challenge', 116, Math.max(808, tauntBottom + 24))
 
   if (predictedChampion) {
     context.fillStyle = 'rgba(239, 255, 245, 0.13)'
