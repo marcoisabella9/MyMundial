@@ -481,6 +481,7 @@ h3 {
 .app-shell.dark .mini-group-card strong,
 .app-shell.dark .mini-bracket-stage strong,
 .app-shell.dark .mini-rank-row b,
+.app-shell.dark .mini-rank-row small,
 .app-shell.dark .mini-bracket-card b,
 .app-shell.dark .mini-awards-grid strong {
   color: #f7fff9;
@@ -498,6 +499,7 @@ h3 {
 .app-shell.dark .match-card.settled.correct,
 .app-shell.dark .mini-bracket-card.settled.correct,
 .app-shell.dark .mini-settlement-card.correct,
+.app-shell.dark .mini-rank-row.correct,
 .app-shell.dark .award-card.settled.correct,
 .app-shell.dark .mini-awards-grid div.settled.correct {
   background: rgba(15, 143, 79, 0.18);
@@ -510,6 +512,7 @@ h3 {
 .app-shell.dark .group-match.settled.partial,
 .app-shell.dark .match-card.settled.partial,
 .app-shell.dark .mini-bracket-card.settled.partial,
+.app-shell.dark .mini-rank-row.partial,
 .app-shell.dark .mini-settlement-card.partial {
   background: rgba(167, 106, 0, 0.2);
   border-color: rgba(241, 201, 74, 0.5);
@@ -521,6 +524,7 @@ h3 {
 .app-shell.dark .group-match.settled.missed,
 .app-shell.dark .match-card.settled.missed,
 .app-shell.dark .mini-bracket-card.settled.missed,
+.app-shell.dark .mini-rank-row.missed,
 .app-shell.dark .mini-settlement-card.missed,
 .app-shell.dark .award-card.settled.missed,
 .app-shell.dark .mini-awards-grid div.settled.missed {
@@ -1277,6 +1281,7 @@ h3 {
 .match-card.settled.correct,
 .mini-bracket-card.settled.correct,
 .mini-settlement-card.correct,
+.mini-rank-row.correct,
 .award-card.settled.correct,
 .mini-awards-grid div.settled.correct {
   border-color: rgba(15, 143, 79, 0.62);
@@ -1289,6 +1294,7 @@ h3 {
 .group-match.settled.partial,
 .match-card.settled.partial,
 .mini-bracket-card.settled.partial,
+.mini-rank-row.partial,
 .mini-settlement-card.partial {
   border-color: rgba(167, 106, 0, 0.52);
   background: #fff8e5;
@@ -1300,6 +1306,7 @@ h3 {
 .group-match.settled.missed,
 .match-card.settled.missed,
 .mini-bracket-card.settled.missed,
+.mini-rank-row.missed,
 .mini-settlement-card.missed,
 .award-card.settled.missed,
 .mini-awards-grid div.settled.missed {
@@ -2280,9 +2287,12 @@ h3 {
   align-items: center;
   gap: 7px;
   min-height: 24px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 4px;
 }
 
-.mini-rank-row span {
+.mini-rank {
   width: 18px;
   height: 18px;
   display: grid;
@@ -2292,6 +2302,14 @@ h3 {
   color: #0f8f4f;
   font-size: 10px;
   font-weight: 850;
+}
+
+.mini-rank-row small {
+  grid-column: 2 / -1;
+  color: #60726a;
+  font-size: 10px;
+  font-weight: 850;
+  text-transform: uppercase;
 }
 
 .mini-rank-row b,
@@ -2340,7 +2358,7 @@ h3 {
 
 .mini-settlement-card {
   display: grid;
-  grid-template-columns: 24px auto 24px 1fr;
+  grid-template-columns: 24px auto 24px minmax(72px, 1fr);
   align-items: center;
   gap: 7px;
   border: 1px solid #e1eae4;
@@ -2353,6 +2371,11 @@ h3 {
   justify-self: end;
   font-size: 11px;
   font-weight: 850;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: right;
+  line-height: 1.15;
 }
 
 .mini-awards-grid {
@@ -2825,6 +2848,20 @@ h3 {
   .mini-bracket-card small {
     grid-column: auto;
     justify-self: start;
+  }
+
+  .mini-settlement-list {
+    grid-template-columns: 1fr;
+  }
+
+  .mini-settlement-card {
+    grid-template-columns: 22px auto 22px;
+  }
+
+  .mini-settlement-card span {
+    grid-column: 1 / -1;
+    justify-self: start;
+    text-align: left;
   }
 
   .bracket-scroll {

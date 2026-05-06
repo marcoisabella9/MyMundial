@@ -1744,6 +1744,40 @@ function standingsForPredictions(predictions) {
   return buildStandings(scores)
 }
 
+function standingsForFixtureResults(fixtureResults) {
+  const scores = freshGroupScores()
+  Object.values(fixtureResults)
+    .filter((result) => result.fixtureType === 'group' && scores[result.fixtureKey])
+    .forEach((result) => {
+      scores[result.fixtureKey] = {
+        ...scores[result.fixtureKey],
+        home: result.homeTeam,
+        away: result.awayTeam,
+        homeScore: result.homeScore,
+        awayScore: result.awayScore,
+        touched: true,
+      }
+    })
+  return buildStandings(scores)
+}
+
+function settledGroupIds(fixtureResults) {
+  return new Set(
+    Object.values(fixtureResults)
+      .filter((result) => result.fixtureType === 'group')
+      .map((result) => result.stage?.replace('Group ', '') ?? result.fixtureKey?.split('-')[0])
+      .filter(Boolean),
+  )
+}
+
+function groupStandingState(groupId, row, index, actualGroupStandings, settledGroups) {
+  if (!settledGroups.has(groupId)) return 'pending'
+  const actualRows = actualGroupStandings[groupId] ?? []
+  if (actualRows[index]?.team === row.team) return 'correct'
+  if (index < 3 && actualRows.slice(0, 3).some((actualRow) => actualRow.team === row.team)) return 'partial'
+  return 'missed'
+}
+
 function bracketPredictionsByStage(predictions) {
   const order = ['R32', 'R16', 'QF', 'SF', 'Final', '3rd Place']
   const grouped = Object.fromEntries(order.map((stage) => [stage, []]))
@@ -2564,6 +2598,8 @@ function MemberPredictionModal({ member, scoringMode, matchSequence, fixtureResu
   const predictions = Array.from(predictionMap.values())
   const awardRows = member.awardPicks ?? []
   const groupStandings = standingsForPredictions(predictions)
+  const actualGroupStandings = standingsForFixtureResults(fixtureResults)
+  const groupsWithResults = settledGroupIds(fixtureResults)
   const bracketStages = bracketPredictionsByStage(predictions)
   const hasGroupPredictions = predictions.some((prediction) => prediction.fixtureType === 'group')
   const hasBracketPredictions = predictions.some((prediction) => prediction.fixtureType === 'bracket')
@@ -2608,13 +2644,19 @@ function MemberPredictionModal({ member, scoringMode, matchSequence, fixtureResu
                   {groups.map((group) => (
                     <article className="mini-group-card" key={group.id}>
                       <strong>Group {group.id}</strong>
-                      {groupStandings[group.id].map((row, index) => (
-                        <div className="mini-rank-row" key={row.team}>
-                          <span>{index + 1}</span>
+                      {groupStandings[group.id].map((row, index) => {
+                        const standingState = groupStandingState(group.id, row, index, actualGroupStandings, groupsWithResults)
+                        return (
+                        <div className={`mini-rank-row ${standingState}`} key={row.team}>
+                          <span className="mini-rank">{index + 1}</span>
                           <TeamFlag team={row.team} />
                           <b>{row.pts}</b>
+                          {standingState !== 'pending' && (
+                            <small>{standingState === 'correct' ? 'Correct spot' : standingState === 'partial' ? 'Qualified' : 'Missed'}</small>
+                          )}
                         </div>
-                      ))}
+                        )
+                      })}
                     </article>
                   ))}
                 </div>
