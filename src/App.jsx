@@ -8,13 +8,13 @@ import {
   CircleHelp,
   CircleMinus,
   CirclePlus,
-  Copy,
   Eye,
   Info,
   Medal,
   Moon,
   Radio,
   Save,
+  Share2,
   Sparkles,
   Sun,
   UserRound,
@@ -225,10 +225,153 @@ function latestPredictionTime(predictions) {
   return latest ?? null
 }
 
+const inviteTaunts = [
+  'Your friend thinks they know ball. Accept?',
+  'Screenshot the bracket. Argue later.',
+  'Bring receipts or stay quiet.',
+  'Lock it now. Defend it later.',
+  'Group chat legacy starts here.',
+  'Your bracket is about to be evidence.',
+  'No edits after kickoff.',
+  'Pick with your chest.',
+  'Everyone is an expert until the points drop.',
+  'You have been invited to explain yourself.',
+  'The bracket will remember.',
+  'One league. Many bad opinions.',
+  'Predict now. Apologize later.',
+  'Your football knowledge is being summoned.',
+  'Enter if you know ball.',
+  'The receipts are permanent.',
+  'Do not let them pick unchallenged.',
+]
+
+function inviteTauntForSeed(seed = '') {
+  const total = String(seed).split('').reduce((sum, char) => sum + char.charCodeAt(0), 0)
+  return inviteTaunts[total % inviteTaunts.length]
+}
+
+function randomInviteTaunt() {
+  return inviteTaunts[Math.floor(Math.random() * inviteTaunts.length)]
+}
+
 function leagueInviteUrl(inviteCode) {
   if (!inviteCode || inviteCode === 'SIGNIN') return ''
   const baseUrl = typeof window === 'undefined' ? 'https://mymundial.vercel.app/' : window.location.origin + window.location.pathname
   return `${baseUrl}?invite=${encodeURIComponent(inviteCode)}`
+}
+
+function leagueInviteText({ league, inviteUrl, hostName, taunt, predictedChampion }) {
+  const championLine = predictedChampion ? `I have ${predictedChampion} winning it all.` : 'I locked my World Cup picks.'
+  return [
+    `${hostName} invited you to ${league.name}.`,
+    taunt,
+    championLine,
+    '',
+    'Lock your picks. Keep the receipts.',
+    inviteUrl,
+  ].join('\n')
+}
+
+function wrapCanvasText(context, text, x, y, maxWidth, lineHeight) {
+  const words = text.split(' ')
+  let line = ''
+  let currentY = y
+  words.forEach((word) => {
+    const testLine = line ? `${line} ${word}` : word
+    if (context.measureText(testLine).width > maxWidth && line) {
+      context.fillText(line, x, currentY)
+      line = word
+      currentY += lineHeight
+    } else {
+      line = testLine
+    }
+  })
+  if (line) context.fillText(line, x, currentY)
+  return currentY + lineHeight
+}
+
+function canvasToBlob(canvas) {
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(blob), 'image/png', 0.92)
+  })
+}
+
+async function createLeagueInviteImage({ league, inviteUrl, hostName, memberCount, taunt, predictedChampion }) {
+  const championMeta = predictedChampion ? meta(predictedChampion) : null
+  const canvas = document.createElement('canvas')
+  const width = 1080
+  const height = 1350
+  canvas.width = width
+  canvas.height = height
+  const context = canvas.getContext('2d')
+  context.fillStyle = '#08140f'
+  context.fillRect(0, 0, width, height)
+
+  const gradient = context.createLinearGradient(0, 0, width, height)
+  gradient.addColorStop(0, '#0f8f4f')
+  gradient.addColorStop(0.52, '#0d2319')
+  gradient.addColorStop(1, '#111814')
+  context.fillStyle = gradient
+  context.fillRect(44, 44, width - 88, height - 88)
+
+  context.strokeStyle = 'rgba(239, 255, 245, 0.72)'
+  context.lineWidth = 4
+  context.strokeRect(72, 72, width - 144, height - 144)
+  context.strokeStyle = 'rgba(239, 255, 245, 0.22)'
+  context.setLineDash([18, 16])
+  context.beginPath()
+  context.moveTo(116, 895)
+  context.lineTo(width - 116, 895)
+  context.stroke()
+  context.setLineDash([])
+
+  context.fillStyle = '#effff5'
+  context.font = '800 34px Arial'
+  context.fillText('MYMUNDIAL INVITE', 116, 158)
+  context.font = '900 92px Arial'
+  wrapCanvasText(context, league.name, 116, 278, width - 232, 92)
+
+  context.fillStyle = '#b9ffd5'
+  context.font = '800 42px Arial'
+  context.fillText(`${hostName} invited you.`, 116, 530)
+  context.fillStyle = '#effff5'
+  context.font = '900 58px Arial'
+  wrapCanvasText(context, '8 spots. 1 champion. No casuals.', 116, 650, width - 232, 66)
+
+  context.fillStyle = '#d8efe2'
+  context.font = '700 38px Arial'
+  wrapCanvasText(context, taunt, 116, 808, width - 232, 48)
+
+  if (predictedChampion) {
+    context.fillStyle = 'rgba(239, 255, 245, 0.13)'
+    context.fillRect(116, 878, width - 232, 76)
+    context.fillStyle = '#effff5'
+    context.font = '800 30px Arial'
+    context.fillText('PREDICTED WINNER', 146, 925)
+    context.font = '900 34px Arial'
+    context.fillText(`${championMeta.flag ?? ''} ${championMeta.code} ${predictedChampion}`, 500, 925)
+  }
+
+  context.fillStyle = '#08140f'
+  context.fillRect(116, 980, width - 232, 126)
+  context.fillStyle = '#effff5'
+  context.font = '900 42px Arial'
+  context.fillText('Lock your picks. Keep the receipts.', 152, 1056)
+
+  context.fillStyle = '#b9ffd5'
+  context.font = '800 30px Arial'
+  context.fillText(`CODE ${league.inviteCode}`, 116, 1188)
+  context.fillStyle = '#d8efe2'
+  context.font = '700 27px Arial'
+  wrapCanvasText(context, inviteUrl, 116, 1240, width - 232, 36)
+
+  context.fillStyle = 'rgba(239, 255, 245, 0.14)'
+  context.fillRect(742, 110, 206, 76)
+  context.fillStyle = '#effff5'
+  context.font = '800 28px Arial'
+  context.fillText(`${memberCount} joined`, 776, 158)
+
+  return canvasToBlob(canvas)
 }
 
 function memberCompletion(member) {
@@ -1112,11 +1255,47 @@ function App() {
       setShareStatus('Create a league first.')
       return
     }
+    const hostName = profile.displayName || 'A friend'
+    const predictedChampion = bracketRounds.find(([round]) => round === 'Finals')?.[1]
+      ?.find((match) => match.label === 'Final')?.picked?.team ?? ''
+    const taunt = randomInviteTaunt()
+    const shareText = leagueInviteText({ league, inviteUrl, hostName, taunt, predictedChampion })
     try {
-      await navigator.clipboard.writeText(inviteUrl)
-      setShareStatus('Invite link copied.')
+      const imageBlob = await createLeagueInviteImage({
+        league,
+        inviteUrl,
+        hostName,
+        memberCount: league.members.length,
+        taunt,
+        predictedChampion,
+      })
+      const file = imageBlob ? new File([imageBlob], `${league.inviteCode}-mymundial-invite.png`, { type: 'image/png' }) : null
+      if (file && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({
+          title: `${league.name} on MyMundial`,
+          text: shareText,
+          url: inviteUrl,
+          files: [file],
+        })
+        setShareStatus('Invite card ready to send.')
+        return
+      }
+      if (imageBlob && window.ClipboardItem && navigator.clipboard?.write) {
+        await navigator.clipboard.write([
+          new window.ClipboardItem({ [imageBlob.type]: imageBlob }),
+        ])
+        setShareStatus('Invite card copied. Paste it into your group chat.')
+        return
+      }
+      await navigator.clipboard.writeText(shareText)
+      setShareStatus('Invite message copied.')
     } catch {
-      setShareStatus(inviteUrl)
+      try {
+        await navigator.clipboard.writeText(shareText)
+        setShareStatus('Invite message copied.')
+      } catch {
+        setShareStatus(inviteUrl)
+      }
     }
   }
 
@@ -2510,6 +2689,8 @@ function LeagueManager({
   isSignedIn,
 }) {
   const inviteUrl = leagueInviteUrl(league.inviteCode)
+  const hostName = leagueRows.find((member) => member.role === 'owner')?.displayName ?? 'A friend'
+  const previewTaunt = inviteTauntForSeed(`${league.inviteCode}-${league.name}`)
   return (
     <div className="panel league-manager">
       <div className="panel-head">
@@ -2538,12 +2719,20 @@ function LeagueManager({
         <button className="full-button" onClick={onCreate} disabled={!isSignedIn || leagueStatus.loading}><Sparkles size={16} /> Create league</button>
         <button className="full-button secondary" onClick={onUpdateName} disabled={!isSignedIn || !league.inviteCode || leagueStatus.loading}><Save size={16} /> Rename</button>
         <button className="full-button secondary" onClick={onJoin} disabled={!isSignedIn || leagueStatus.loading}><Users size={16} /> Join code</button>
-        <button className="full-button secondary" onClick={onCopyInvite} disabled={!isSignedIn || !inviteUrl}><Copy size={16} /> Copy invite</button>
+        <button className="full-button share-button" onClick={onCopyInvite} disabled={!isSignedIn || !inviteUrl}><Share2 size={16} /> Share invite</button>
       </div>
       {inviteUrl && (
-        <div className="invite-card">
-          <span>Share link</span>
-          <strong>{inviteUrl}</strong>
+        <div className="invite-card share-invite-card">
+          <div className="invite-card-topline">
+            <span>MyMundial invite</span>
+            <strong>{league.inviteCode}</strong>
+          </div>
+          <h3>{hostName} invited you to {league.name}.</h3>
+          <p>{previewTaunt}</p>
+          <div className="invite-card-footer">
+            <strong>Lock your picks. Keep the receipts.</strong>
+            <span>{inviteUrl}</span>
+          </div>
         </div>
       )}
       {(leagueStatus.message || leagueStatus.error || shareStatus) && (

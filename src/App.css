@@ -393,10 +393,40 @@ h3 {
 .app-shell.dark .score-line,
 .app-shell.dark .mvp-grid article,
 .app-shell.dark .recipient-panel,
+.app-shell.dark .invite-card,
 .app-shell.dark .official-result-card,
 .app-shell.dark .points-stack .score-line {
   background: #111c18;
   border-color: #2e4037;
+}
+
+.app-shell.dark .share-invite-card {
+  background:
+    linear-gradient(135deg, rgba(15, 143, 79, 0.25), rgba(17, 28, 24, 0.96) 48%, rgba(215, 185, 77, 0.14)),
+    #111c18;
+  border-color: rgba(35, 203, 119, 0.42);
+}
+
+.app-shell.dark .share-invite-card::before {
+  border-color: rgba(185, 255, 213, 0.28);
+}
+
+.app-shell.dark .share-invite-card h3,
+.app-shell.dark .invite-card strong {
+  color: #f7fff9;
+}
+
+.app-shell.dark .share-invite-card p {
+  color: #d8efe2;
+}
+
+.app-shell.dark .invite-card-footer {
+  border-color: rgba(185, 255, 213, 0.2);
+}
+
+.app-shell.dark .invite-card-footer strong,
+.app-shell.dark .invite-card-topline span {
+  color: #b9ffd5;
 }
 
 .app-shell.dark .group-match.no-pick,
@@ -2049,6 +2079,10 @@ h3 {
   padding: 10px 12px;
 }
 
+.share-button {
+  grid-column: 1 / -1;
+}
+
 .invite-card,
 .league-stats {
   display: grid;
@@ -2076,6 +2110,87 @@ h3 {
   overflow-wrap: anywhere;
   color: #17211b;
   font-size: 13px;
+}
+
+.share-invite-card {
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(15, 143, 79, 0.34);
+  background:
+    linear-gradient(135deg, rgba(15, 143, 79, 0.14), rgba(255, 255, 255, 0.96) 48%, rgba(215, 185, 77, 0.12)),
+    #fbfdfc;
+  padding: 16px;
+}
+
+.share-invite-card::before {
+  content: '';
+  position: absolute;
+  inset: 12px;
+  pointer-events: none;
+  border: 1px dashed rgba(15, 143, 79, 0.36);
+  border-radius: 8px;
+}
+
+.invite-card-topline,
+.invite-card-footer {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.invite-card-topline span {
+  color: #0f8f4f;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.invite-card-topline strong {
+  border-radius: 999px;
+  background: #0f8f4f;
+  color: #ffffff;
+  padding: 5px 8px;
+  font-size: 11px;
+}
+
+.share-invite-card h3,
+.share-invite-card p {
+  position: relative;
+  z-index: 1;
+}
+
+.share-invite-card h3 {
+  margin: 12px 0 4px;
+  color: #17211b;
+  font-size: 20px;
+  line-height: 1.15;
+}
+
+.share-invite-card p {
+  margin: 0;
+  color: #31463a;
+  font-weight: 800;
+}
+
+.invite-card-footer {
+  margin-top: 14px;
+  border-top: 1px solid rgba(15, 143, 79, 0.2);
+  padding-top: 12px;
+  align-items: flex-start;
+  flex-direction: column;
+}
+
+.invite-card-footer strong {
+  color: #0f8f4f;
+  font-size: 14px;
+}
+
+.invite-card-footer span {
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .league-stats {
