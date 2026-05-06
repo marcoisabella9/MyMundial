@@ -438,6 +438,10 @@ h3 {
   color: #f7fff9;
 }
 
+.app-shell.dark .recipient-panel h3 {
+  color: #f7fff9;
+}
+
 .app-shell.dark .match-state {
   color: #a8bbb1;
 }
@@ -2105,6 +2109,12 @@ h3 {
   align-content: start;
 }
 
+.standings-stack {
+  display: grid;
+  gap: 18px;
+  align-content: start;
+}
+
 .league-member-row {
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr) 86px auto;
@@ -2165,6 +2175,89 @@ h3 {
 .view-picks-button:hover {
   border-color: #0f8f4f;
   color: #0f8f4f;
+}
+
+.global-leaderboard-card {
+  align-content: start;
+}
+
+.global-leaderboard-list {
+  display: grid;
+  gap: 8px;
+}
+
+.global-leaderboard-row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid #e1eae4;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.global-leaderboard-row.current-user {
+  border-color: rgba(15, 143, 79, 0.62);
+  background: #eef9f2;
+}
+
+.global-leaderboard-main {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.global-leaderboard-main strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.global-leaderboard-main small,
+.global-leaderboard-points span,
+.global-self-row > span {
+  color: #647067;
+  font-size: 12px;
+}
+
+.global-leaderboard-points {
+  display: grid;
+  gap: 2px;
+  text-align: right;
+}
+
+.global-self-row {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  border-top: 1px solid #e1eae4;
+  padding-top: 12px;
+}
+
+.app-shell.dark .global-leaderboard-row {
+  background: rgba(20, 30, 26, 0.92);
+  border-color: #33453b;
+}
+
+.app-shell.dark .global-leaderboard-row.current-user {
+  background: rgba(15, 143, 79, 0.16);
+  border-color: rgba(35, 203, 119, 0.55);
+}
+
+.app-shell.dark .global-leaderboard-main strong,
+.app-shell.dark .global-leaderboard-points strong {
+  color: #f7fff9;
+}
+
+.app-shell.dark .global-leaderboard-main small,
+.app-shell.dark .global-leaderboard-points span,
+.app-shell.dark .global-self-row > span {
+  color: #a8bbb1;
+}
+
+.app-shell.dark .global-self-row {
+  border-color: #33453b;
 }
 
 .modal-backdrop {

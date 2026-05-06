@@ -37,10 +37,10 @@ function summarizePrediction(prediction) {
 const GROUP_DRAFT_POINTS = 160
 const KNOCKOUT_DRAFT_POINTS = 260
 const AWARD_DRAFT_POINTS = {
-  potm: 160,
-  boot: 120,
-  glove: 80,
-  young: 80,
+  potm: 600,
+  boot: 500,
+  glove: 400,
+  young: 300,
 }
 
 const RESULT_POINTS = {
@@ -163,7 +163,13 @@ function activityFromRow(item) {
 }
 
 function normalizeText(value) {
-  return String(value ?? '').trim().toLowerCase()
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+    .replace(/\s+/g, ' ')
 }
 
 function isMissingResultTableError(error) {
@@ -834,6 +840,14 @@ export const supabaseMvpStore = {
 
   async saveAwardPick({ profile, award, recipient, locked = false }) {
     const client = await requireClient()
+    const { data: existingResult, error: resultError } = await client
+      .from('mvp_award_results')
+      .select('award_key')
+      .eq('award_key', award.id)
+      .maybeSingle()
+    if (resultError) throw resultError
+    if (existingResult) throw new Error(`${award.label} is locked because an official result has been saved.`)
+
     const { data, error } = await client
       .from('mvp_award_picks')
       .upsert({

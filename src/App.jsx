@@ -125,6 +125,30 @@ function lockText(lockAt) {
   return 'Prediction open'
 }
 
+function normalizeAwardName(value) {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+    .replace(/\s+/g, ' ')
+}
+
+function formatAwardRecipientName(value) {
+  const particles = new Set(['da', 'de', 'del', 'der', 'di', 'do', 'dos', 'das', 'du', 'la', 'le', 'van', 'von'])
+  return String(value ?? '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLocaleLowerCase()
+    .split(' ')
+    .map((part, index) => {
+      if (index > 0 && particles.has(part)) return part
+      return part.replace(/\p{L}+/gu, (word) => word.charAt(0).toLocaleUpperCase() + word.slice(1))
+    })
+    .join(' ')
+}
+
 function groupLockAt(match) {
   return GROUP_LOCK_AT_BY_DATE[match.date]
 }
@@ -1098,14 +1122,14 @@ function App() {
 
   async function saveAwardPick(award, recipient) {
     setSelectedAward(award.id)
-    if (isLockedAt(AWARD_LOCK_AT)) {
+    if (isLockedAt(AWARD_LOCK_AT) || awardResults[award.id]) {
       setAwardSaveStatus({ loading: false, message: '', error: 'Awards are locked. Picks can no longer be changed.' })
       return
     }
     setAwardSaveStatus({ loading: true, message: `Saving ${award.label}...`, error: '' })
     try {
       if (isSignedIn) {
-        const savedAward = await supabaseMvpStore.saveAwardPick({ profile, award, recipient })
+        const savedAward = await supabaseMvpStore.saveAwardPick({ profile, award, recipient: formatAwardRecipientName(recipient) })
         const remoteLeague = await supabaseMvpStore.loadLeague(currentUser)
         setAwardPicks((current) => ({ ...current, [award.id]: savedAward }))
         setLastSavedAt(savedAward.updatedAt)
@@ -1152,7 +1176,7 @@ function App() {
     }
     setResultStatus({ loading: true, message: `Saving ${award.label} result...`, error: '' })
     try {
-      const savedAward = await supabaseMvpStore.saveAwardResult({ award, recipient })
+      const savedAward = await supabaseMvpStore.saveAwardResult({ award, recipient: formatAwardRecipientName(recipient) })
       const [remoteResults, remoteLeague] = await Promise.all([
         supabaseMvpStore.loadResults(),
         supabaseMvpStore.loadLeague(currentUser),
@@ -1432,11 +1456,18 @@ function App() {
                 isSignedIn={isSignedIn}
               />
             </div>
-            <LeagueStandings
-              league={league}
-              rows={leagueRows}
-              onViewPredictions={setSelectedLeagueMemberId}
-            />
+            <div className="standings-stack">
+              <LeagueStandings
+                league={league}
+                rows={leagueRows}
+                onViewPredictions={setSelectedLeagueMemberId}
+              />
+              <GlobalLeaderboard
+                rows={leagueRows}
+                currentUserId={profile.id}
+                scoringMode={league.scoringMode}
+              />
+            </div>
             <LeagueActivity league={league} />
             {selectedLeagueMember && (
               <MemberPredictionModal
@@ -1715,7 +1746,7 @@ function predictionFromContextScore(context, score) {
 function awardSettlementView(award, awardPick, awardResults) {
   const result = awardResults[award.id]
   if (!result) return { mode: 'pending', state: 'pending', points: 0, total: award.points, label: 'Pending', detail: 'No result yet' }
-  const correct = awardPick?.recipient?.trim().toLowerCase() === result.recipient.trim().toLowerCase()
+  const correct = normalizeAwardName(awardPick?.recipient) === normalizeAwardName(result.recipient)
   return {
     mode: 'settled',
     state: correct ? 'correct' : 'missed',
@@ -2571,6 +2602,63 @@ function LeagueStandings({ league, rows, onViewPredictions }) {
   )
 }
 
+function GlobalLeaderboard({ rows, currentUserId, scoringMode }) {
+  const isSettled = scoringMode === 'settled'
+  const rankedRows = rows.map((member, index) => ({ ...member, globalRank: index + 1 }))
+  const topRows = rankedRows.slice(0, 10)
+  const currentRow = rankedRows.find((member) => member.id === currentUserId)
+  const showCurrentFooter = currentRow && !topRows.some((member) => member.id === currentUserId)
+
+  return (
+    <div className="panel global-leaderboard-card">
+      <div className="panel-head">
+        <div>
+          <p className="eyebrow">Global</p>
+          <h2>Global leaderboard</h2>
+        </div>
+        <span className="pill">Top 10</span>
+      </div>
+      {topRows.length === 0 && (
+        <div className="empty-state">Leaderboard appears after saved picks.</div>
+      )}
+      {topRows.length > 0 && (
+        <div className="global-leaderboard-list">
+          {topRows.map((member) => (
+            <GlobalLeaderboardRow
+              key={member.id}
+              member={member}
+              isCurrentUser={member.id === currentUserId}
+              isSettled={isSettled}
+            />
+          ))}
+        </div>
+      )}
+      {showCurrentFooter && (
+        <div className="global-self-row">
+          <span>Your place</span>
+          <GlobalLeaderboardRow member={currentRow} isCurrentUser isSettled={isSettled} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function GlobalLeaderboardRow({ member, isCurrentUser, isSettled }) {
+  return (
+    <div className={`global-leaderboard-row ${isCurrentUser ? 'current-user' : ''}`}>
+      <span className="rank">{member.globalRank}</span>
+      <div className="global-leaderboard-main">
+        <strong>{member.displayName}</strong>
+        <small>{member.savedPicks}/{member.targetPicks} picks saved</small>
+      </div>
+      <div className="global-leaderboard-points">
+        <strong>{member.points}</strong>
+        <span>{isSettled ? 'pts' : 'draft pts'}</span>
+      </div>
+    </div>
+  )
+}
+
 function LeagueActivity({ league }) {
   return (
     <aside className="panel league-activity-panel">
@@ -2740,34 +2828,34 @@ function AwardsView({ selectedAward, setSelectedAward, awardPicks, awardResults,
   const activeAward = awards.find((award) => award.id === selectedAward) ?? awards[0]
   const searchMeta = awardSearchMeta[activeAward.id] ?? awardSearchMeta.potm
   const cleanQuery = awardQuery.trim()
-  const normalizedQuery = cleanQuery.toLowerCase()
-  const activeCandidates = useMemo(() => {
-    const eligible = awardCandidateCatalog.filter((candidate) => {
-      const awardEligible = candidate.tags.includes(activeAward.id)
-      const positionEligible = !searchMeta.position || candidate.position === searchMeta.position
-      return awardEligible && positionEligible
-    })
-    const filtered = normalizedQuery
-      ? eligible.filter((candidate) => (
-        candidate.name.toLowerCase().includes(normalizedQuery)
-        || candidate.team.toLowerCase().includes(normalizedQuery)
-        || candidate.position.toLowerCase().includes(normalizedQuery)
-      ))
-      : eligible
-    return filtered.slice(0, 18)
-  }, [activeAward.id, normalizedQuery, searchMeta.position])
-  const exactEligibleCandidate = activeCandidates.find((candidate) => candidate.name.toLowerCase() === normalizedQuery)
+  const normalizedQuery = normalizeAwardName(cleanQuery)
+  const activeAwardLocked = isLocked || Boolean(awardResults[activeAward.id])
+  const activeLockLabel = isLocked ? lockLabel : awardResults[activeAward.id] ? 'Result saved - locked' : ''
+  const eligibleCandidates = awardCandidateCatalog.filter((candidate) => {
+    const awardEligible = candidate.tags.includes(activeAward.id)
+    const positionEligible = !searchMeta.position || candidate.position === searchMeta.position
+    return awardEligible && positionEligible
+  })
+  const activeCandidates = (normalizedQuery
+    ? eligibleCandidates.filter((candidate) => (
+      normalizeAwardName(candidate.name).includes(normalizedQuery)
+      || normalizeAwardName(candidate.team).includes(normalizedQuery)
+      || normalizeAwardName(candidate.position).includes(normalizedQuery)
+    ))
+    : eligibleCandidates
+  ).slice(0, 18)
+  const exactEligibleCandidate = activeCandidates.find((candidate) => normalizeAwardName(candidate.name) === normalizedQuery)
   const knownButBlocked = Boolean(searchMeta.position && cleanQuery && awardCandidateCatalog.some((candidate) => (
     candidate.position !== searchMeta.position
     && (
-      candidate.name.toLowerCase().includes(normalizedQuery)
-      || normalizedQuery.includes(candidate.name.toLowerCase())
+      normalizeAwardName(candidate.name).includes(normalizedQuery)
+      || normalizedQuery.includes(normalizeAwardName(candidate.name))
     )
   )))
   const canUseCustom = Boolean(cleanQuery && !exactEligibleCandidate && !knownButBlocked)
 
   function chooseAwardRecipient(recipient) {
-    if (isLocked) return
+    if (activeAwardLocked) return
     onSaveAwardPick(activeAward, recipient)
     setAwardQuery('')
   }
@@ -2780,7 +2868,7 @@ function AwardsView({ selectedAward, setSelectedAward, awardPicks, awardResults,
             <p className="eyebrow">Tournament-long bonuses</p>
             <h2>Awards predictions</h2>
           </div>
-          <span className={`pill ${isLocked ? 'locked-pill' : ''}`}>{isLocked ? lockLabel : isSignedIn ? 'Syncs to account' : 'Sign in to sync'}</span>
+          <span className={`pill ${activeAwardLocked ? 'locked-pill' : ''}`}>{activeAwardLocked ? activeLockLabel : isSignedIn ? 'Syncs to account' : 'Sign in to sync'}</span>
         </div>
         <div className="award-grid">
           {awards.map((award) => (
@@ -2809,7 +2897,7 @@ function AwardsView({ selectedAward, setSelectedAward, awardPicks, awardResults,
                 value={awardQuery}
                 onChange={(event) => setAwardQuery(event.target.value)}
                 placeholder={searchMeta.placeholder}
-                disabled={isLocked}
+                disabled={activeAwardLocked}
               />
             </label>
             <div className="award-picked">
@@ -2818,8 +2906,12 @@ function AwardsView({ selectedAward, setSelectedAward, awardPicks, awardResults,
             </div>
           </div>
           <p className="award-helper">{searchMeta.helper}</p>
-          {isLocked && (
-            <p className="save-message error">Awards are locked. Picks can no longer be changed.</p>
+          {activeAwardLocked && (
+            <p className="save-message error">
+              {awardResults[activeAward.id]
+                ? `${activeAward.label} is locked because an official result has been saved.`
+                : 'Awards are locked. Picks can no longer be changed.'}
+            </p>
           )}
           <div className="recipient-list">
             {activeCandidates.map((candidate) => (
@@ -2827,7 +2919,7 @@ function AwardsView({ selectedAward, setSelectedAward, awardPicks, awardResults,
                 key={`${candidate.name}-${candidate.team}`}
                 className={awardPicks[activeAward.id]?.recipient === candidate.name ? 'selected' : ''}
                 onClick={() => chooseAwardRecipient(candidate.name)}
-                disabled={isLocked || awardSaveStatus.loading}
+                disabled={activeAwardLocked || awardSaveStatus.loading}
               >
                 <strong>{candidate.name}</strong>
                 <span>{candidate.team} - {candidate.position}</span>
@@ -2837,10 +2929,10 @@ function AwardsView({ selectedAward, setSelectedAward, awardPicks, awardResults,
               <button
                 className="custom-recipient"
                 onClick={() => chooseAwardRecipient(cleanQuery)}
-                disabled={isLocked || awardSaveStatus.loading}
+                disabled={activeAwardLocked || awardSaveStatus.loading}
               >
                 <strong>{searchMeta.customLabel}</strong>
-                <span>{cleanQuery}</span>
+                <span>{formatAwardRecipientName(cleanQuery)}</span>
               </button>
             )}
           </div>

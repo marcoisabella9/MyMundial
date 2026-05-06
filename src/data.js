@@ -119,10 +119,10 @@ export const liveEvents = [
 ]
 
 export const awards = [
-  { id: 'potm', label: 'Player of the Tournament', pick: 'Kylian Mbappe', points: 160, state: 'pending' },
-  { id: 'boot', label: 'Golden Boot', pick: 'Erling Haaland', points: 120, state: 'pending' },
-  { id: 'glove', label: 'Golden Glove', pick: 'Thibaut Courtois', points: 80, state: 'pending' },
-  { id: 'young', label: 'Best Young Player', pick: 'Lamine Yamal', points: 80, state: 'tracking' },
+  { id: 'potm', label: 'Player of the Tournament', pick: 'Kylian Mbappe', points: 600, state: 'pending' },
+  { id: 'boot', label: 'Golden Boot', pick: 'Erling Haaland', points: 500, state: 'pending' },
+  { id: 'glove', label: 'Golden Glove', pick: 'Thibaut Courtois', points: 400, state: 'pending' },
+  { id: 'young', label: 'Best Young Player', pick: 'Lamine Yamal', points: 300, state: 'tracking' },
 ]
 
 export const awardCandidateCatalog = [
